@@ -531,6 +531,20 @@ export async function getCatalogCategoryTree() {
 }
 
 
+export function unwrapCatalogCategoryTree(response: any): CatalogCategoryTreeNode[] {
+  if (Array.isArray(response)) return response;
+
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.categories)) return response.categories;
+  if (Array.isArray(response?.items)) return response.items;
+
+  if (Array.isArray(response?.data?.data)) return response.data.data;
+  if (Array.isArray(response?.data?.categories)) return response.data.categories;
+  if (Array.isArray(response?.data?.items)) return response.data.items;
+
+  return [];
+}
+
 export async function resolveCatalogCategoryByPath(path: string) {
   const cleanPath = String(path || "").replace(/^\/+|\/+$/g, "");
 

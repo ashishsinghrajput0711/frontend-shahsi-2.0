@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useWishlist } from "@/components/WishlistProvider";
 
 import { filterPublicVisibleProducts } from "@/lib/product-visibility";
 import SiteHeader from "@/components/SiteHeader";
@@ -863,6 +864,11 @@ export function CategoryListingPage({
   const selectedCategoryPath = String(categoryPath || "")
     .replace(/^\/+|\/+$/g, "")
     .trim();
+const {
+  checkProductsWishlist,
+  isWishlisted,
+  toggleWishlist,
+} = useWishlist();
 
   const selectedCategorySlug =
     selectedCategoryPath.split("/").filter(Boolean).pop() || "";
@@ -1035,6 +1041,16 @@ if (categoryTree.length && !selectedCategory) {
   useEffect(() => {
   setCurrentPage(1);
 }, [catalogFilterKey, catalogSort, selectedCategoryPath]);
+
+useEffect(() => {
+  const ids = catalogProducts
+    .map((product) => String(product.productId || product.id || ""))
+    .filter(Boolean);
+
+  if (!ids.length) return;
+
+  checkProductsWishlist(ids);
+}, [catalogProducts, checkProductsWishlist]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1412,13 +1428,17 @@ mapping/public status check karo.
               className="grid grid-cols-1 gap-x-[18px] gap-y-[34px] sm:grid-cols-2 xl:grid-cols-4"
             >
               {paginatedProducts.map((product, index) => (
-                <BridesmaidProductCard
+  <BridesmaidProductCard
   key={`${product.productId}-${product.variantId || product.name}`}
   product={product}
   index={index}
   categoryPath={selectedCategoryPath}
   heightOptions={heightOptions}
   isAssigned={assignedProductId === product.productId}
+  isWishlisted={isWishlisted(product.productId)}
+  onToggleWishlist={(variantId?: string | null) =>
+    toggleWishlist(product.productId, variantId || product.variantId || null)
+  }
   onAddToWorkspace={handleAddToBridalWorkspace}
 />
               ))}
@@ -1444,7 +1464,7 @@ mapping/public status check karo.
 
       <TrustBand />
       <InstagramStrip />
-      <Footer />
+    
       <PremiumAnimationStyles />
     </main>
   );
@@ -2562,7 +2582,9 @@ function BridesmaidProductCard({
   categoryPath,
   heightOptions,
   isAssigned,
+  isWishlisted,
   isAssigning = false,
+  onToggleWishlist,
   onAddToWorkspace,
 }: {
   product: BridesmaidProduct;
@@ -2570,7 +2592,9 @@ function BridesmaidProductCard({
   categoryPath: string;
   heightOptions: CatalogHeightOption[];
   isAssigned: boolean;
+  isWishlisted: boolean;
   isAssigning?: boolean;
+  onToggleWishlist: (variantId?: string | null) => Promise<boolean>;
   onAddToWorkspace: (
     product: BridesmaidProduct,
     selection?: AddWorkspaceSelection,
@@ -2636,6 +2660,9 @@ function BridesmaidProductCard({
   const [cardCartMessage, setCardCartMessage] = useState("");
   const [cardCartError, setCardCartError] = useState("");
 
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+const [wishlistError, setWishlistError] = useState("");
+
   const selectedVariant = useMemo(() => {
     const size = normalizeCompare(selectedSize);
     const color = normalizeCompare(selectedColorName);
@@ -2677,6 +2704,28 @@ function BridesmaidProductCard({
       height: selectedHeight,
     });
   }
+
+  async function handleWishlistClick(event: React.MouseEvent<HTMLButtonElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (!product.productId) {
+    setWishlistError("Product ID missing hai.");
+    return;
+  }
+
+  try {
+    setWishlistLoading(true);
+    setWishlistError("");
+
+    await onToggleWishlist(selectedVariantId || product.variantId || null);
+  } catch (error: any) {
+    console.error("Wishlist toggle failed:", error);
+    setWishlistError(error?.message || "Wishlist update failed.");
+  } finally {
+    setWishlistLoading(false);
+  }
+}
 
   async function handleCartAddClick() {
     if (!product.productId) {
@@ -2785,13 +2834,26 @@ function BridesmaidProductCard({
           <div className="absolute inset-0 bg-gradient-to-t from-[#15100c]/36 via-transparent to-transparent opacity-0 transition-opacity duration-700 group-hover:opacity-100" />
         </a>
 
-        <button
-          type="button"
-          aria-label="Add to wishlist"
-          className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-[#fbf8f1]/95 text-[#15100c] shadow-[0_8px_20px_rgba(0,0,0,0.10)] backdrop-blur transition-all duration-300 hover:scale-110 hover:bg-[#15100c] hover:text-white"
-        >
-          <Heart className="h-4 w-4 stroke-[1.7]" />
-        </button>
+     <button
+  type="button"
+  onClick={handleWishlistClick}
+  disabled={wishlistLoading || !product.productId}
+  aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+  className="absolute right-4 top-4 z-20 inline-flex items-center justify-center text-[#15100c] transition-all duration-300 hover:scale-110 disabled:cursor-not-allowed disabled:opacity-60"
+>
+  {wishlistLoading ? (
+    <Loader2 className="h-6 w-6 animate-spin" />
+  ) : (
+    <Heart
+      className={[
+        "h-7 w-7 stroke-[1.8] drop-shadow-[0_1px_3px_rgba(255,255,255,0.85)]",
+        isWishlisted
+          ? "fill-[#000000] text-[#020201]"
+          : "fill-transparent text-[#020101]",
+      ].join(" ")}
+    />
+  )}
+</button>
 
         {isAssigned || product.tag ? (
           <span className="absolute left-3 top-3 bg-[#fbf8f1]/95 px-2.5 py-1 text-[10px] uppercase tracking-[2px] text-[#15100c] backdrop-blur">
@@ -2990,6 +3052,13 @@ href={productDetailHref}
           {cardCartError}
         </p>
       ) : null}
+
+      {wishlistError ? (
+  <p className="mt-2 flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[11px] leading-4 text-red-700">
+    <XCircle className="h-3.5 w-3.5 shrink-0" />
+    {wishlistError}
+  </p>
+) : null}
     </article>
   );
 }

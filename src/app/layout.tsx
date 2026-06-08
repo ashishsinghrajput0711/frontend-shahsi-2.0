@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/AppToast";
+import { WishlistProvider } from "@/components/WishlistProvider";
+import SiteFooter from "@/components/SiteFooter";
 
 export const metadata: Metadata = {
   title: "Shahsi",
@@ -15,7 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <WishlistProvider>
+            {children}
+            <SiteFooter />
+          </WishlistProvider>
+        </ToastProvider>
       </body>
     </html>
   );

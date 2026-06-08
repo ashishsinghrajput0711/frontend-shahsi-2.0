@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Heart,
   Home,
+  Loader2,
   Package,
   Palette,
   RefreshCcw,
@@ -17,9 +18,12 @@ import {
   Shirt,
   ShoppingBag,
   Sparkles,
+  Trash2,
   UserRound,
   Users,
+  XCircle,
 } from "lucide-react";
+
 import {
   clearSavedToken,
   createUserProfile,
@@ -33,6 +37,12 @@ import {
   updateUserProfile,
   type UserProfilePayload,
 } from "@/lib/api/account.api";
+import {
+  getWishlist,
+  removeFromWishlist,
+  unwrapWishlistItems,
+  type WishlistItem,
+} from "@/lib/api/wishlist.api";
 import { useToast } from "@/components/ui/AppToast";
 
 type AuthMode = "login" | "signup" | "forgot";
@@ -70,6 +80,99 @@ const defaultProfileForm: UserProfilePayload = {
   fitPreference: "regular",
 };
 
+function readFirst(...values: unknown[]) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") {
+      return String(value);
+    }
+  }
+
+  return "";
+}
+
+function getWishlistProduct(item: WishlistItem): any {
+  return item.product || {};
+}
+
+function getWishlistProductId(item: WishlistItem) {
+  const product = getWishlistProduct(item);
+
+  return readFirst(item.productId, product.productId, product.id);
+}
+
+function getWishlistProductTitle(item: WishlistItem) {
+  const product = getWishlistProduct(item);
+
+  return readFirst(product.title, product.name, "Product title missing");
+}
+
+function getWishlistProductImage(item: WishlistItem) {
+  const product = getWishlistProduct(item);
+
+  return readFirst(
+    product.imageUrl,
+    product.thumbnail,
+    product.image,
+    product.primaryImage,
+    product.media?.url,
+    product.media?.secureUrl,
+    product.primaryMedia?.url,
+    product.primaryMedia?.secureUrl
+  );
+}
+
+function getWishlistProductMeta(item: WishlistItem) {
+  const product = getWishlistProduct(item);
+
+  const brand = readFirst(product.brand);
+  const category = readFirst(
+    product.category,
+    product.primaryCategory,
+    Array.isArray(product.categoryPath)
+      ? product.categoryPath.join(" / ")
+      : product.categoryPath
+  );
+  const color = readFirst(product.color);
+
+  return [brand, category, color].filter(Boolean).join(" · ");
+}
+
+function getWishlistProductPrice(item: WishlistItem) {
+  const product = getWishlistProduct(item);
+
+  const value =
+    product.salePrice ??
+    product.listingPrice ??
+    product.price ??
+    product.rentalPrice ??
+    product.retailPrice ??
+    0;
+
+  const numeric = Number(value);
+
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function getWishlistProductHref(item: WishlistItem) {
+  const product = getWishlistProduct(item);
+  const slug = readFirst(product.slug, getWishlistProductId(item));
+
+  const categoryPathRaw = product.categoryPath;
+  const categoryPath = Array.isArray(categoryPathRaw)
+    ? categoryPathRaw.join("/")
+    : readFirst(categoryPathRaw, product.primaryCategory, product.category);
+
+  if (categoryPath && slug) {
+    return `/${categoryPath}/${encodeURIComponent(slug)}`;
+  }
+
+  if (slug) {
+    return `/products/${encodeURIComponent(slug)}`;
+  }
+
+  return "#";
+}
+
 const orders: Order[] = [
   {
     id: "SH-10294",
@@ -104,32 +207,18 @@ const orders: Order[] = [
 ];
 
 const rentals = [
-  ["Sorrel Stretch Satin Dress", "Event: May 19, 2026", "Return by May 23", "Backup size L"],
-  ["Azra Bondi Chiffon Dress", "Event: June 2, 2026", "Reserved", "Backup size A10"],
-];
-
-const wishlist = [
-  {
-    name: "Azra Bondi Chiffon Dress",
-    meta: "Sky Blue · High fit · +72 colors",
-    price: "$99",
-    image:
-      "https://images.unsplash.com/photo-1595777457583-95e059d581b8?q=80&w=900&auto=format&fit=crop",
-  },
-  {
-    name: "Debra Convertible Dress",
-    meta: "Champagne · Group ready",
-    price: "$119",
-    image:
-      "https://images.unsplash.com/photo-1551803091-e20673f15770?q=80&w=900&auto=format&fit=crop",
-  },
-  {
-    name: "Valentine Floral Burnout Dress",
-    meta: "Olive Floral · Garden edit",
-    price: "$129",
-    image:
-      "https://images.unsplash.com/photo-1550639525-c97d455acf70?q=80&w=900&auto=format&fit=crop",
-  },
+  [
+    "Sorrel Stretch Satin Dress",
+    "Event: May 19, 2026",
+    "Return by May 23",
+    "Backup size L",
+  ],
+  [
+    "Azra Bondi Chiffon Dress",
+    "Event: June 2, 2026",
+    "Reserved",
+    "Backup size A10",
+  ],
 ];
 
 const bridalParties = [
@@ -138,7 +227,12 @@ const bridalParties = [
 ];
 
 const returns = [
-  ["Sorrel Stretch Satin Dress", "Rental return", "Return due May 23", "Fit feedback needed"],
+  [
+    "Sorrel Stretch Satin Dress",
+    "Rental return",
+    "Return due May 23",
+    "Fit feedback needed",
+  ],
   ["Niamh Corset Dress", "Exchange", "Waist too snug", "Fit Engine updated"],
 ];
 
@@ -155,7 +249,11 @@ const sections: Array<{
   { id: "overview", label: "Overview", icon: <Home className="h-4 w-4" /> },
   { id: "orders", label: "Orders", icon: <ShoppingBag className="h-4 w-4" /> },
   { id: "rentals", label: "Rentals", icon: <Package className="h-4 w-4" /> },
-  { id: "subscription", label: "Subscription", icon: <RefreshCcw className="h-4 w-4" /> },
+  {
+    id: "subscription",
+    label: "Subscription",
+    icon: <RefreshCcw className="h-4 w-4" />,
+  },
   { id: "fit", label: "Saved fit profile", icon: <Ruler className="h-4 w-4" /> },
   { id: "wishlist", label: "Wishlist", icon: <Heart className="h-4 w-4" /> },
   { id: "bridal", label: "Bridal parties", icon: <Users className="h-4 w-4" /> },
@@ -194,14 +292,19 @@ export default function AccountPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
 
+  const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([]);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [wishlistError, setWishlistError] = useState("");
+  const [removingWishlistId, setRemovingWishlistId] = useState("");
+
   const summary = useMemo(
     () => ({
       activeOrders: orders.length,
       bridalParties: bridalParties.length,
-      wishlistItems: wishlist.length,
+      wishlistItems: wishlistItems.length,
       resaleListings: resaleListings.length,
     }),
-    []
+    [wishlistItems.length]
   );
 
   const bmi = useMemo(() => {
@@ -237,6 +340,9 @@ export default function AccountPage() {
 
       if (!token) {
         setIsLoggedIn(false);
+        setCurrentUser(null);
+        setWishlistItems([]);
+        setWishlistError("");
         return;
       }
 
@@ -250,6 +356,7 @@ export default function AccountPage() {
       }
 
       await loadProfile();
+      await loadAccountWishlist();
     } finally {
       setCheckingAuth(false);
     }
@@ -285,6 +392,69 @@ export default function AccountPage() {
       }
     } finally {
       setProfileLoading(false);
+    }
+  }
+
+  async function loadAccountWishlist() {
+    try {
+      setWishlistLoading(true);
+      setWishlistError("");
+
+      const response = await getWishlist({
+        page: 1,
+        limit: 60,
+      });
+
+      const items = unwrapWishlistItems(response);
+      setWishlistItems(items);
+    } catch (error: any) {
+      console.error("Account wishlist load failed:", error);
+
+      const message = String(error?.message || "");
+
+      if (
+        message.toLowerCase().includes("unauthorized") ||
+        message.toLowerCase().includes("401")
+      ) {
+        clearSavedToken();
+        setIsLoggedIn(false);
+        setCurrentUser(null);
+        setWishlistItems([]);
+        setWishlistError("Session expired. Please login again.");
+        return;
+      }
+
+      setWishlistItems([]);
+      setWishlistError(message || "Wishlist API failed.");
+    } finally {
+      setWishlistLoading(false);
+    }
+  }
+
+  async function handleRemoveWishlistItem(item: WishlistItem) {
+    const productId = getWishlistProductId(item);
+
+    if (!productId) return;
+
+    try {
+      setRemovingWishlistId(productId);
+      setWishlistError("");
+
+      await removeFromWishlist(productId);
+
+      setWishlistItems((prev) =>
+        prev.filter((entry) => getWishlistProductId(entry) !== productId)
+      );
+
+      toast.success("Removed from wishlist", "Product removed successfully.");
+    } catch (error: any) {
+      const message = error?.message || "Unable to remove wishlist item.";
+
+      console.error("Account wishlist remove failed:", error);
+      setWishlistError(message);
+      toast.error("Wishlist remove failed", message);
+    } finally {
+      setRemovingWishlistId("");
     }
   }
 
@@ -438,6 +608,9 @@ export default function AccountPage() {
     setCurrentUser(null);
     setProfileExists(false);
     setProfileForm(defaultProfileForm);
+    setWishlistItems([]);
+    setWishlistError("");
+    setRemovingWishlistId("");
     setAuthMode("login");
     setAuthError("");
     setAuthMessage("");
@@ -542,7 +715,17 @@ export default function AccountPage() {
                   />
                 )}
 
-                {activeSection === "wishlist" && <WishlistPanel />}
+                {activeSection === "wishlist" && (
+                  <WishlistPanel
+                    items={wishlistItems}
+                    loading={wishlistLoading}
+                    error={wishlistError}
+                    removingId={removingWishlistId}
+                    onRemove={handleRemoveWishlistItem}
+                    onRefresh={loadAccountWishlist}
+                  />
+                )}
+
                 {activeSection === "bridal" && <BridalPartiesPanel />}
                 {activeSection === "returns" && <ReturnsPanel />}
                 {activeSection === "resale" && <ResalePanel />}
@@ -584,18 +767,18 @@ function Header({
   return (
     <header className="sticky top-0 z-40 border-b border-neutral-200 bg-[#fbfaf6]/90 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1500px] items-center justify-between px-4 py-5 lg:px-8">
-      <Link
-  href="/"
-  className="group inline-flex flex-col"
-  aria-label="Go to Shahsi homepage"
->
-  <p className="text-2xl font-semibold tracking-tight transition group-hover:text-[#b98262]">
-    Shahsi
-  </p>
-  <p className="hidden text-xs uppercase tracking-[0.18em] text-neutral-500 transition group-hover:text-[#b98262] sm:block">
-    Account hub
-  </p>
-</Link>
+        <Link
+          href="/"
+          className="group inline-flex flex-col"
+          aria-label="Go to Shahsi homepage"
+        >
+          <p className="text-2xl font-semibold tracking-tight transition group-hover:text-[#b98262]">
+            Shahsi
+          </p>
+          <p className="hidden text-xs uppercase tracking-[0.18em] text-neutral-500 transition group-hover:text-[#b98262] sm:block">
+            Account hub
+          </p>
+        </Link>
 
         <nav className="hidden items-center gap-8 text-sm lg:flex">
           <a>Orders</a>
@@ -618,20 +801,38 @@ function Header({
             >
               Logout
             </button>
-          ) : null}
-
-          <button className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-medium text-white">
-            Shop now
-          </button>
+          ) : (
+            <Link
+              href="/"
+              className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-medium text-white"
+            >
+              Shop now
+            </Link>
+          )}
         </div>
       </div>
     </header>
   );
 }
 
-function AuthCard(props: {
+function AuthCard({
+  authMode,
+  setAuthMode,
+  authLoading,
+  authError,
+  authMessage,
+  loginForm,
+  setLoginForm,
+  signupForm,
+  setSignupForm,
+  forgotForm,
+  setForgotForm,
+  handleLogin,
+  handleSignup,
+  handleForgotPassword,
+}: {
   authMode: AuthMode;
-  setAuthMode: (mode: AuthMode) => void;
+  setAuthMode: React.Dispatch<React.SetStateAction<AuthMode>>;
   authLoading: boolean;
   authError: string;
   authMessage: string;
@@ -654,95 +855,73 @@ function AuthCard(props: {
   handleSignup: (e: React.FormEvent<HTMLFormElement>) => void;
   handleForgotPassword: (e: React.FormEvent<HTMLFormElement>) => void;
 }) {
-  const {
-    authMode,
-    setAuthMode,
-    authLoading,
-    authError,
-    authMessage,
-    loginForm,
-    setLoginForm,
-    signupForm,
-    setSignupForm,
-    forgotForm,
-    setForgotForm,
-    handleLogin,
-    handleSignup,
-    handleForgotPassword,
-  } = props;
-
   return (
-    <div className="mx-auto grid max-w-6xl gap-8 py-10 lg:grid-cols-[1fr_0.85fr] lg:items-center">
-      <section className="rounded-[2.25rem] bg-neutral-950 p-8 text-white md:p-12">
-        <p className="text-xs uppercase tracking-[0.24em] text-white/55">
-          Shahsi Account
+    <div className="mx-auto grid max-w-[1100px] overflow-hidden rounded-[2rem] bg-white shadow-sm ring-1 ring-neutral-200 lg:grid-cols-[1fr_0.9fr]">
+      <div className="bg-neutral-950 p-8 text-white md:p-12">
+        <p className="text-xs uppercase tracking-[0.22em] text-white/50">
+          Account access
         </p>
-        <h1 className="mt-4 text-5xl font-medium leading-[0.98] tracking-tight md:text-6xl">
-          Your wardrobe, events, orders, and fit profile in one place.
+        <h1 className="mt-5 text-5xl font-medium tracking-tight">
+          Your Shahsi wardrobe starts here.
         </h1>
-        <p className="mt-5 max-w-2xl leading-7 text-white/70">
-          Login or create your account to manage measurements, orders, rentals,
-          wishlist, bridal parties, returns, and resale listings.
+        <p className="mt-5 max-w-xl leading-7 text-white/70">
+          Login to manage orders, rentals, saved fit profile, wishlist, bridal
+          parties, returns, resale listings, and Gownloop lifecycle.
         </p>
-      </section>
 
-      <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-neutral-200">
-        <div className="mb-6 grid grid-cols-2 rounded-full bg-[#f7f2ea] p-1">
+        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+          <DarkMetric label="Fit intelligence" value="Profile" />
+          <DarkMetric label="Shopping flow" value="Wishlist" />
+          <DarkMetric label="Lifecycle" value="Orders" />
+          <DarkMetric label="Group" value="Bridal" />
+        </div>
+      </div>
+
+      <div className="p-8 md:p-12">
+        <div className="mb-8 flex rounded-full bg-[#f4efe8] p-1 text-sm">
           <button
             type="button"
             onClick={() => setAuthMode("login")}
-            className={`rounded-full px-4 py-3 text-sm font-semibold transition ${
-              authMode === "login" || authMode === "forgot"
-                ? "bg-neutral-950 text-white"
-                : "text-neutral-600 hover:bg-white"
+            className={`flex-1 rounded-full px-4 py-3 ${
+              authMode === "login" ? "bg-white shadow-sm" : ""
             }`}
           >
             Login
           </button>
-
           <button
             type="button"
             onClick={() => setAuthMode("signup")}
-            className={`rounded-full px-4 py-3 text-sm font-semibold transition ${
-              authMode === "signup"
-                ? "bg-neutral-950 text-white"
-                : "text-neutral-600 hover:bg-white"
+            className={`flex-1 rounded-full px-4 py-3 ${
+              authMode === "signup" ? "bg-white shadow-sm" : ""
             }`}
           >
-            Sign Up
+            Signup
+          </button>
+          <button
+            type="button"
+            onClick={() => setAuthMode("forgot")}
+            className={`flex-1 rounded-full px-4 py-3 ${
+              authMode === "forgot" ? "bg-white shadow-sm" : ""
+            }`}
+          >
+            Forgot
           </button>
         </div>
 
-        <h2 className="text-3xl font-medium">
-          {authMode === "login"
-            ? "Welcome Back"
-            : authMode === "signup"
-              ? "Create Account"
-              : "Forgot Password"}
-        </h2>
-
-        <p className="mt-2 text-sm leading-6 text-neutral-600">
-          {authMode === "login"
-            ? "Login to manage your Shahsi account."
-            : authMode === "signup"
-              ? "Create your Shahsi account to save your profile."
-              : "Enter your email and we will send password reset instructions."}
-        </p>
-
         {authError ? (
-          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {authError}
           </div>
         ) : null}
 
         {authMessage ? (
-          <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <div className="mb-5 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
             {authMessage}
           </div>
         ) : null}
 
         {authMode === "login" ? (
-          <form onSubmit={handleLogin} className="mt-6 space-y-5">
+          <form onSubmit={handleLogin} className="grid gap-4">
             <AuthInput
               label="Email"
               type="email"
@@ -750,9 +929,7 @@ function AuthCard(props: {
               onChange={(value) =>
                 setLoginForm((prev) => ({ ...prev, email: value }))
               }
-              placeholder="you@example.com"
             />
-
             <AuthInput
               label="Password"
               type="password"
@@ -760,35 +937,27 @@ function AuthCard(props: {
               onChange={(value) =>
                 setLoginForm((prev) => ({ ...prev, password: value }))
               }
-              placeholder="Enter password"
             />
 
             <button
-              type="button"
-              onClick={() => {
-                setForgotForm({ email: loginForm.email });
-                setAuthMode("forgot");
-              }}
-              className="text-sm font-semibold text-neutral-700 underline underline-offset-4"
+              type="submit"
+              disabled={authLoading}
+              className="mt-3 inline-flex h-13 items-center justify-center rounded-full bg-neutral-950 px-6 text-sm font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-60"
             >
-              Forgot password?
+              {authLoading ? "Please wait..." : "Login"}
             </button>
-
-            <SubmitButton loading={authLoading} text="Login" loadingText="Logging in..." />
           </form>
         ) : null}
 
         {authMode === "signup" ? (
-          <form onSubmit={handleSignup} className="mt-6 space-y-5">
+          <form onSubmit={handleSignup} className="grid gap-4">
             <AuthInput
               label="Name"
               value={signupForm.name}
               onChange={(value) =>
                 setSignupForm((prev) => ({ ...prev, name: value }))
               }
-              placeholder="Your name"
             />
-
             <AuthInput
               label="Email"
               type="email"
@@ -796,20 +965,14 @@ function AuthCard(props: {
               onChange={(value) =>
                 setSignupForm((prev) => ({ ...prev, email: value }))
               }
-              placeholder="you@example.com"
             />
-
             <AuthInput
-              label="Phone Optional"
-              type="tel"
+              label="Phone"
               value={signupForm.phone}
               onChange={(value) =>
                 setSignupForm((prev) => ({ ...prev, phone: value }))
               }
-              placeholder="Phone number"
-              required={false}
             />
-
             <AuthInput
               label="Password"
               type="password"
@@ -817,46 +980,64 @@ function AuthCard(props: {
               onChange={(value) =>
                 setSignupForm((prev) => ({ ...prev, password: value }))
               }
-              placeholder="Create password"
             />
 
-            <SubmitButton
-              loading={authLoading}
-              text="Create Account"
-              loadingText="Creating..."
-            />
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="mt-3 inline-flex h-13 items-center justify-center rounded-full bg-neutral-950 px-6 text-sm font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-60"
+            >
+              {authLoading ? "Please wait..." : "Create account"}
+            </button>
           </form>
         ) : null}
 
         {authMode === "forgot" ? (
-          <form onSubmit={handleForgotPassword} className="mt-6 space-y-5">
+          <form onSubmit={handleForgotPassword} className="grid gap-4">
             <AuthInput
               label="Email"
               type="email"
               value={forgotForm.email}
-              onChange={(value) =>
-                setForgotForm((prev) => ({ ...prev, email: value }))
-              }
-              placeholder="you@example.com"
-            />
-
-            <SubmitButton
-              loading={authLoading}
-              text="Send Reset Link"
-              loadingText="Sending..."
+              onChange={(value) => setForgotForm({ email: value })}
             />
 
             <button
-              type="button"
-              onClick={() => setAuthMode("login")}
-              className="w-full rounded-full border border-neutral-300 px-6 py-3 text-sm font-semibold"
+              type="submit"
+              disabled={authLoading}
+              className="mt-3 inline-flex h-13 items-center justify-center rounded-full bg-neutral-950 px-6 text-sm font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-60"
             >
-              Back to Login
+              {authLoading ? "Please wait..." : "Send reset link"}
             </button>
           </form>
         ) : null}
-      </section>
+      </div>
     </div>
+  );
+}
+
+function AuthInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+        {label}
+      </span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-13 rounded-2xl border border-neutral-200 bg-[#fbfaf6] px-4 outline-none focus:border-neutral-950"
+      />
+    </label>
   );
 }
 
@@ -872,64 +1053,63 @@ function Hero({
     resaleListings: number;
   };
   userEmail: string;
-  setActiveSection: (section: AccountSection) => void;
+  setActiveSection: React.Dispatch<React.SetStateAction<AccountSection>>;
 }) {
   return (
-    <section className="overflow-hidden rounded-[2.25rem] bg-neutral-950 text-white shadow-sm">
-      <div className="grid gap-8 p-6 md:p-10 lg:grid-cols-[0.95fr_1.05fr] lg:p-12">
+    <section className="rounded-[2rem] bg-neutral-950 p-8 text-white md:p-12">
+      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr]">
         <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-white/55">
+          <p className="text-xs uppercase tracking-[0.22em] text-white/50">
             /account · {userEmail}
           </p>
-          <h1 className="mt-4 text-5xl font-medium leading-[0.98] tracking-tight md:text-6xl">
+
+          <h1 className="mt-5 max-w-2xl text-5xl font-medium leading-[0.95] tracking-tight md:text-6xl">
             Your Shahsi wardrobe, events, orders, and fit profile.
           </h1>
+
           <p className="mt-5 max-w-2xl leading-7 text-white/70">
             Manage orders, rentals, Gownloop subscription, saved fit profile,
             wishlist, bridal parties, returns, and resale listings from one
             luxury account hub.
           </p>
+
           <div className="mt-8 flex flex-wrap gap-3">
-            <button className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-4 text-sm font-semibold uppercase tracking-[0.16em] text-neutral-950">
-              Continue shopping <ArrowRight className="h-4 w-4" />
-            </button>
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-950"
+            >
+              Continue shopping
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+
             <button
               type="button"
               onClick={() => setActiveSection("fit")}
-              className="rounded-full border border-white/30 px-6 py-4 text-sm font-semibold uppercase tracking-[0.16em] text-white"
+              className="inline-flex items-center gap-2 rounded-full border border-white/30 px-6 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white"
             >
               Open fit profile
             </button>
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <HeroMetric icon={<ShoppingBag className="h-4 w-4" />} label="Active orders" value={`${summary.activeOrders}`} />
-          <HeroMetric icon={<Users className="h-4 w-4" />} label="Bridal parties" value={`${summary.bridalParties}`} />
-          <HeroMetric icon={<Heart className="h-4 w-4" />} label="Wishlist" value={`${summary.wishlistItems}`} />
-          <HeroMetric icon={<Shirt className="h-4 w-4" />} label="Resale listings" value={`${summary.resaleListings}`} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <MetricCard label="Active Orders" value={summary.activeOrders} />
+          <MetricCard label="Bridal Parties" value={summary.bridalParties} />
+          <MetricCard label="Wishlist" value={summary.wishlistItems} />
+          <MetricCard label="Resale Listings" value={summary.resaleListings} />
         </div>
       </div>
     </section>
   );
 }
 
-function HeroMetric({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
+function MetricCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl bg-white/10 p-5 backdrop-blur">
-      <div className="mb-3 flex items-center gap-2 text-white/75">
-        {icon}
-        <span className="text-xs uppercase tracking-[0.14em]">{label}</span>
-      </div>
-      <p className="text-3xl font-medium">{value}</p>
+    <div className="rounded-[1.4rem] bg-white/10 p-6">
+      <p className="text-xs uppercase tracking-[0.18em] text-white/50">
+        {label}
+      </p>
+      <p className="mt-4 text-3xl font-medium">{value}</p>
     </div>
   );
 }
@@ -940,43 +1120,46 @@ function AccountNav({
   userEmail,
 }: {
   activeSection: AccountSection;
-  setActiveSection: (section: AccountSection) => void;
+  setActiveSection: React.Dispatch<React.SetStateAction<AccountSection>>;
   userEmail: string;
 }) {
   return (
-    <aside className="lg:sticky lg:top-28 lg:self-start">
-      <div className="rounded-[1.75rem] bg-white p-4 shadow-sm ring-1 ring-neutral-200">
-        <div className="mb-4 rounded-2xl bg-[#f7f2ea] p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-950 text-white">
-              <UserRound className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="font-medium">Shahsi Member</p>
-              <p className="truncate text-sm text-neutral-500">{userEmail}</p>
-            </div>
+    <aside className="h-fit rounded-[2rem] bg-white p-5 shadow-sm ring-1 ring-neutral-200">
+      <div className="mb-5 rounded-[1.5rem] bg-[#f4efe8] p-4">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-full bg-neutral-950 text-white">
+            <UserRound className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold">Shahsi Member</p>
+            <p className="truncate text-xs text-neutral-500">{userEmail}</p>
           </div>
         </div>
+      </div>
 
-        <div className="grid gap-1">
-          {sections.map((section) => (
+      <div className="grid gap-1">
+        {sections.map((section) => {
+          const active = activeSection === section.id;
+
+          return (
             <button
               key={section.id}
+              type="button"
               onClick={() => setActiveSection(section.id)}
-              className={`flex items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
-                activeSection === section.id
+              className={`flex items-center justify-between rounded-2xl px-4 py-4 text-left transition ${
+                active
                   ? "bg-neutral-950 text-white"
-                  : "hover:bg-neutral-100"
+                  : "text-neutral-950 hover:bg-[#f4efe8]"
               }`}
             >
-              <span className="flex items-center gap-2">
+              <span className="flex items-center gap-3 font-medium">
                 {section.icon}
                 {section.label}
               </span>
               <ChevronRight className="h-4 w-4" />
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </aside>
   );
@@ -987,57 +1170,181 @@ function Overview({
   profileForm,
   bmi,
 }: {
-  setActiveSection: (section: AccountSection) => void;
+  setActiveSection: React.Dispatch<React.SetStateAction<AccountSection>>;
   profileForm: UserProfilePayload;
   bmi: string | null;
 }) {
   return (
-    <>
-      <section className="grid gap-5 md:grid-cols-4">
-        <QuickCard icon={<ShoppingBag className="h-5 w-5" />} title="Orders" value="3 active" copy="Track current orders" onClick={() => setActiveSection("orders")} />
-        <QuickCard icon={<Package className="h-5 w-5" />} title="Rentals" value="2 rentals" copy="Event windows" onClick={() => setActiveSection("rentals")} />
-        <QuickCard icon={<RefreshCcw className="h-5 w-5" />} title="Gownloop" value="Active" copy="Next box June 1" onClick={() => setActiveSection("subscription")} />
-        <QuickCard icon={<Ruler className="h-5 w-5" />} title="Fit Profile" value="Connected" copy="Measurements active" onClick={() => setActiveSection("fit")} />
-      </section>
+    <div className="grid gap-8">
+      <Panel
+        title="Account Overview"
+        eyebrow="Dashboard"
+        copy="Quick shortcuts for the account lifecycle."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => setActiveSection("orders")}
+            className="rounded-[1.5rem] bg-[#fbfaf6] p-5 text-left ring-1 ring-neutral-200"
+          >
+            <ShoppingBag className="h-5 w-5" />
+            <h3 className="mt-4 font-medium">Orders</h3>
+            <p className="mt-1 text-sm text-neutral-500">
+              View order history and current statuses.
+            </p>
+          </button>
 
-      <section className="grid gap-8 xl:grid-cols-[1.1fr_0.9fr]">
+          <button
+            type="button"
+            onClick={() => setActiveSection("wishlist")}
+            className="rounded-[1.5rem] bg-[#fbfaf6] p-5 text-left ring-1 ring-neutral-200"
+          >
+            <Heart className="h-5 w-5" />
+            <h3 className="mt-4 font-medium">Wishlist</h3>
+            <p className="mt-1 text-sm text-neutral-500">
+              Open saved products from backend wishlist.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSection("fit")}
+            className="rounded-[1.5rem] bg-[#fbfaf6] p-5 text-left ring-1 ring-neutral-200"
+          >
+            <Ruler className="h-5 w-5" />
+            <h3 className="mt-4 font-medium">Saved fit profile</h3>
+            <p className="mt-1 text-sm text-neutral-500">
+              Height {profileForm.height} cm · BMI {bmi || "-"}
+            </p>
+          </button>
+        </div>
+      </Panel>
+
+      <div className="grid gap-8 xl:grid-cols-2">
         <OrdersPanel compact />
         <FitProfileSummary profileForm={profileForm} bmi={bmi} />
-      </section>
-
-      <section className="grid gap-8 xl:grid-cols-2">
-        <BridalPartiesPanel compact />
-        <SubscriptionPanel compact />
-      </section>
-    </>
+      </div>
+    </div>
   );
 }
 
-function QuickCard({
-  icon,
+function Panel({
   title,
-  value,
+  eyebrow,
   copy,
-  onClick,
+  children,
 }: {
-  icon: React.ReactNode;
   title: string;
-  value: string;
-  copy: string;
-  onClick: () => void;
+  eyebrow: string;
+  copy?: string;
+  children: React.ReactNode;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="rounded-[1.5rem] bg-white p-5 text-left shadow-sm ring-1 ring-neutral-200 transition hover:-translate-y-0.5"
-    >
-      <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-[#f7f2ea]">
-        {icon}
+    <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-neutral-200">
+      <div className="mb-6">
+        <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
+          {eyebrow}
+        </p>
+        <h2 className="mt-3 text-4xl font-medium tracking-tight">{title}</h2>
+        {copy ? <p className="mt-3 text-neutral-600">{copy}</p> : null}
       </div>
-      <p className="text-sm text-neutral-500">{title}</p>
-      <p className="mt-1 text-2xl font-medium">{value}</p>
-      <p className="mt-2 text-sm text-neutral-600">{copy}</p>
-    </button>
+
+      {children}
+    </section>
+  );
+}
+
+function OrdersPanel({ compact = false }: { compact?: boolean }) {
+  return (
+    <Panel
+      title="Orders"
+      eyebrow="Commerce"
+      copy="Order preview from account dashboard."
+    >
+      <div className="grid gap-4">
+        {orders.slice(0, compact ? 2 : orders.length).map((order) => (
+          <div
+            key={order.id}
+            className="grid gap-4 rounded-[1.5rem] bg-[#fbfaf6] p-4 ring-1 ring-neutral-200 md:grid-cols-[96px_1fr_auto]"
+          >
+            <img
+              src={order.image}
+              alt={order.title}
+              className="h-24 w-24 rounded-2xl object-cover"
+            />
+
+            <div>
+              <p className="text-xs uppercase tracking-[0.16em] text-neutral-500">
+                {order.id} · {order.type}
+              </p>
+              <h3 className="mt-2 font-medium">{order.title}</h3>
+              <p className="mt-1 text-sm text-neutral-500">{order.date}</p>
+            </div>
+
+            <div className="md:text-right">
+              <p className="font-medium">{order.total}</p>
+              <p className="mt-2 inline-flex rounded-full bg-white px-3 py-1 text-xs font-medium ring-1 ring-neutral-200">
+                {order.status}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function RentalsPanel() {
+  return (
+    <Panel
+      title="Rentals"
+      eyebrow="Rental lifecycle"
+      copy="Rental reservations and return readiness."
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        {rentals.map(([name, event, returnText, backup]) => (
+          <InfoTile
+            key={name}
+            icon={<Package className="h-5 w-5" />}
+            title={name}
+            lines={[event, returnText, backup]}
+          />
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function SubscriptionPanel({ compact = false }: { compact?: boolean }) {
+  return (
+    <Panel
+      title="Gownloop Subscription"
+      eyebrow="Subscription"
+      copy="Subscription preview for membership, monthly rotation, closet, keep/buy, swap, and feedback learning."
+    >
+      <div className="rounded-[1.5rem] bg-neutral-950 p-6 text-white">
+        <p className="text-xs uppercase tracking-[0.18em] text-white/50">
+          Current plan
+        </p>
+        <h3 className="mt-2 text-3xl font-medium">Gownloop Signature</h3>
+        <p className="mt-3 text-white/70">
+          Next box ships June 1. Prioritizing A-line midi dresses in jewel
+          tones.
+        </p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <DarkMetric label="Items" value="2/month" />
+          <DarkMetric label="Swap" value="Priority" />
+          <DarkMetric label="Billing" value="Active" />
+        </div>
+      </div>
+
+      {!compact ? (
+        <button className="mt-5 rounded-full border border-neutral-950 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em]">
+          Manage subscription
+        </button>
+      ) : null}
+    </Panel>
   );
 }
 
@@ -1050,35 +1357,25 @@ function FitProfileSummary({
 }) {
   return (
     <Panel
-      title="Saved Fit Profile"
-      eyebrow="User profile"
-      copy="This section is connected with backend user profile measurements."
+      title="Fit Profile"
+      eyebrow="Fit intelligence"
+      copy="Saved measurements preview."
     >
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="Height" value={`${profileForm.height} cm`} />
-        <Metric label="Weight" value={`${profileForm.weight} kg`} />
-        <Metric label="Chest" value={`${profileForm.chest} cm`} />
-        <Metric label="Waist" value={`${profileForm.waist} cm`} />
-      </div>
-
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
         <InfoTile
-          icon={<Sparkles className="h-5 w-5" />}
-          title="Fit Engine"
-          lines={[
-            `Body type: ${profileForm.bodyType}`,
-            `Fit preference: ${profileForm.fitPreference}`,
-            `BMI: ${bmi || "-"}`,
-          ]}
+          icon={<Ruler className="h-5 w-5" />}
+          title={`${profileForm.height} cm`}
+          lines={["Height"]}
         />
         <InfoTile
-          icon={<Palette className="h-5 w-5" />}
-          title="Style Engine"
-          lines={[
-            "Best colors: sage, emerald, champagne",
-            "Modesty: moderate",
-            "Body-shape guidance: A-line",
-          ]}
+          icon={<BadgeCheck className="h-5 w-5" />}
+          title={`${profileForm.weight} kg`}
+          lines={["Weight"]}
+        />
+        <InfoTile
+          icon={<Sparkles className="h-5 w-5" />}
+          title={bmi || "-"}
+          lines={["BMI"]}
         />
       </div>
     </Panel>
@@ -1102,7 +1399,7 @@ function FitProfilePanel({
   profileLoading: boolean;
   profileSaving: boolean;
   profileError: string;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   updateProfileField: <K extends keyof UserProfilePayload>(
     key: K,
     value: UserProfilePayload[K]
@@ -1112,101 +1409,84 @@ function FitProfilePanel({
   return (
     <Panel
       title="Saved Fit Profile"
-      eyebrow="User profile"
-      copy="Only this measurements section is functional right now. Other account modules are static until backend APIs are connected."
+      eyebrow="Measurements"
+      copy="Update measurements that power recommendations."
     >
-      {profileLoading ? (
-        <div className="mb-5 rounded-2xl border border-neutral-200 bg-[#f7f2ea] px-4 py-3 text-sm text-neutral-600">
-          Loading profile...
-        </div>
-      ) : null}
-
       {profileError ? (
         <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {profileError}
         </div>
       ) : null}
 
-      <form onSubmit={onSubmit}>
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-          <NumberInput
+      <form onSubmit={onSubmit} className="grid gap-5">
+        <div className="grid gap-4 md:grid-cols-2">
+          <NumberField
             label="Height cm"
             value={profileForm.height}
-            onChange={(value) => updateProfileField("height", value)}
+            onChange={(value) => updateProfileField("height", value as any)}
           />
-          <NumberInput
+          <NumberField
             label="Weight kg"
             value={profileForm.weight}
-            onChange={(value) => updateProfileField("weight", value)}
+            onChange={(value) => updateProfileField("weight", value as any)}
           />
-          <NumberInput
+          <NumberField
             label="Chest cm"
             value={profileForm.chest}
-            onChange={(value) => updateProfileField("chest", value)}
+            onChange={(value) => updateProfileField("chest", value as any)}
           />
-          <NumberInput
+          <NumberField
             label="Waist cm"
             value={profileForm.waist}
-            onChange={(value) => updateProfileField("waist", value)}
+            onChange={(value) => updateProfileField("waist", value as any)}
           />
-
-          <div>
-            <label className="mb-2 block text-sm font-medium">Body Type</label>
-            <select
-              value={profileForm.bodyType}
-              onChange={(e) => updateProfileField("bodyType", e.target.value)}
-              className="w-full rounded-2xl border border-neutral-300 bg-[#fbfaf6] px-4 py-3 text-sm capitalize outline-none focus:border-neutral-950"
-            >
-              {bodyTypes.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium">
-              Fit Preference
-            </label>
-            <select
-              value={profileForm.fitPreference}
-              onChange={(e) =>
-                updateProfileField("fitPreference", e.target.value)
-              }
-              className="w-full rounded-2xl border border-neutral-300 bg-[#fbfaf6] px-4 py-3 text-sm capitalize outline-none focus:border-neutral-950"
-            >
-              {fitPreferences.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <Metric label="BMI" value={bmi || "-"} />
-          <Metric label="Status" value={profileExists ? "Saved" : "New"} />
         </div>
 
-        <div className="mt-7 flex flex-wrap gap-3">
+        <div className="grid gap-4 md:grid-cols-2">
+          <SelectField
+            label="Body type"
+            value={String(profileForm.bodyType || "")}
+            options={bodyTypes}
+            onChange={(value) => updateProfileField("bodyType", value as any)}
+          />
+          <SelectField
+            label="Fit preference"
+            value={String(profileForm.fitPreference || "")}
+            options={fitPreferences}
+            onChange={(value) =>
+              updateProfileField("fitPreference", value as any)
+            }
+          />
+        </div>
+
+        <div className="rounded-[1.5rem] bg-[#fbfaf6] p-5 ring-1 ring-neutral-200">
+          <p className="text-sm text-neutral-500">Current BMI</p>
+          <p className="mt-1 text-3xl font-medium">{bmi || "-"}</p>
+          <p className="mt-2 text-sm text-neutral-500">
+            Profile status: {profileExists ? "existing profile" : "new profile"}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
           <button
             type="submit"
             disabled={profileSaving}
-            className="rounded-full bg-neutral-950 px-7 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full bg-neutral-950 px-6 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-60"
           >
             {profileSaving
               ? "Saving..."
               : profileExists
-                ? "Update Measurements"
-                : "Create Measurements"}
+                ? "Update profile"
+                : "Create profile"}
           </button>
 
           <button
             type="button"
             onClick={reloadProfile}
-            className="rounded-full border border-neutral-300 px-7 py-3 text-sm font-semibold"
+            disabled={profileLoading}
+            className="rounded-full border border-neutral-950 px-6 py-3 text-xs font-semibold uppercase tracking-[0.14em]"
           >
-            Refresh
+            {profileLoading ? "Loading..." : "Reload"}
           </button>
         </div>
       </form>
@@ -1214,138 +1494,232 @@ function FitProfilePanel({
   );
 }
 
-function OrdersPanel({ compact = false }: { compact?: boolean }) {
-  const visible = compact ? orders.slice(0, 2) : orders;
-
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: any;
+  onChange: (value: number) => void;
+}) {
   return (
-    <Panel
-      title="Orders"
-      eyebrow="Order history"
-      copy="Static preview for retail, rental, made-to-order, bridal group, subscription, and resale order activity."
-    >
-      <div className="grid gap-4">
-        {visible.map((order) => (
-          <OrderCard key={order.id} order={order} />
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
-function OrderCard({ order }: { order: Order }) {
-  return (
-    <article className="grid gap-4 rounded-[1.5rem] border border-neutral-200 p-4 md:grid-cols-[96px_1fr_auto] md:items-center">
-      <img
-        src={order.image}
-        alt={order.title}
-        className="h-28 w-full rounded-2xl object-cover md:h-24 md:w-24"
+    <label className="grid gap-2">
+      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+        {label}
+      </span>
+      <input
+        type="number"
+        value={value ?? ""}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-13 rounded-2xl border border-neutral-200 bg-[#fbfaf6] px-4 outline-none focus:border-neutral-950"
       />
-
-      <div>
-        <div className="mb-2 flex flex-wrap gap-2">
-          <Badge>{order.status}</Badge>
-          <Badge>{order.type}</Badge>
-        </div>
-        <h3 className="font-medium">{order.title}</h3>
-        <p className="mt-1 text-sm text-neutral-500">
-          {order.id} · {order.date}
-        </p>
-      </div>
-
-      <div className="text-left md:text-right">
-        <p className="text-xl font-medium">{order.total}</p>
-        <button className="mt-2 text-sm font-medium underline underline-offset-4">
-          Track
-        </button>
-      </div>
-    </article>
+    </label>
   );
 }
 
-function RentalsPanel() {
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
   return (
-    <Panel
-      title="Rentals"
-      eyebrow="Rental windows"
-      copy="Static rental preview. Backend integration will connect rental windows, backup sizes, and return deadlines later."
-    >
-      <div className="grid gap-4 md:grid-cols-2">
-        {rentals.map(([title, event, status, backup]) => (
-          <InfoTile
-            key={title}
-            icon={<Package className="h-5 w-5" />}
-            title={title}
-            lines={[event, status, backup]}
-          />
+    <label className="grid gap-2">
+      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-13 rounded-2xl border border-neutral-200 bg-[#fbfaf6] px-4 outline-none focus:border-neutral-950"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
         ))}
-      </div>
-    </Panel>
+      </select>
+    </label>
   );
 }
 
-function SubscriptionPanel({ compact = false }: { compact?: boolean }) {
+function WishlistPanel({
+  items,
+  loading,
+  error,
+  removingId,
+  onRemove,
+  onRefresh,
+}: {
+  items: WishlistItem[];
+  loading: boolean;
+  error: string;
+  removingId: string;
+  onRemove: (item: WishlistItem) => void;
+  onRefresh: () => void;
+}) {
   return (
     <Panel
-      title="Gownloop Subscription"
-      eyebrow="Subscription"
-      copy="Static subscription preview for membership, monthly rotation, closet, keep/buy, swap, and feedback learning."
+      title="Wishlist"
+      eyebrow="Saved products"
+      copy="Your saved products are loaded from backend wishlist."
     >
-      <div className="rounded-[1.5rem] bg-neutral-950 p-6 text-white">
-        <p className="text-xs uppercase tracking-[0.18em] text-white/50">
-          Current plan
-        </p>
-        <h3 className="mt-2 text-3xl font-medium">Gownloop Signature</h3>
-        <p className="mt-3 text-white/70">
-          Next box ships June 1. Prioritizing A-line midi dresses in jewel tones.
-        </p>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <DarkMetric label="Items" value="2/month" />
-          <DarkMetric label="Swap" value="Priority" />
-          <DarkMetric label="Billing" value="Active" />
+      {error ? (
+        <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
+          <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <p className="font-semibold">Wishlist error</p>
+            <p>{error}</p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      {!compact ? (
-        <button className="mt-5 rounded-full border border-neutral-950 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em]">
-          Manage subscription
-        </button>
+      {loading ? (
+        <div className="flex min-h-[240px] items-center justify-center rounded-[1.5rem] border border-neutral-200 bg-[#fbfaf6]">
+          <div className="flex items-center gap-3 text-sm text-neutral-600">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading wishlist from backend...
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && !error && !items.length ? (
+        <div className="rounded-[1.5rem] border border-neutral-200 bg-[#fbfaf6] px-6 py-12 text-center">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-white">
+            <Heart className="h-6 w-6" />
+          </div>
+
+          <h3 className="mt-5 text-xl font-medium">Your wishlist is empty</h3>
+
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-neutral-600">
+            Product heart pe click karke saved products yahan show honge.
+          </p>
+
+          <Link
+            href="/products"
+            className="mt-6 inline-flex rounded-full bg-neutral-950 px-6 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white"
+          >
+            Shop Products
+          </Link>
+        </div>
+      ) : null}
+
+      {!loading && items.length ? (
+        <>
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <p className="text-sm text-neutral-600">
+              {items.length} saved product{items.length === 1 ? "" : "s"}
+            </p>
+
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition hover:bg-white"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-3">
+            {items.map((item) => {
+              const productId = getWishlistProductId(item);
+              const removing = removingId === productId;
+
+              return (
+                <ProductCard
+                  key={item.id || productId}
+                  item={item}
+                  removing={removing}
+                  onRemove={onRemove}
+                />
+              );
+            })}
+          </div>
+        </>
       ) : null}
     </Panel>
   );
 }
 
-function WishlistPanel() {
-  return (
-    <Panel
-      title="Wishlist"
-      eyebrow="Saved products"
-      copy="Static wishlist preview. Backend integration will later connect saved products."
-    >
-      <div className="grid gap-5 md:grid-cols-3">
-        {wishlist.map((item) => (
-          <ProductCard key={item.name} item={item} />
-        ))}
-      </div>
-    </Panel>
-  );
-}
+function ProductCard({
+  item,
+  removing,
+  onRemove,
+}: {
+  item: WishlistItem;
+  removing: boolean;
+  onRemove: (item: WishlistItem) => void;
+}) {
+  const title = getWishlistProductTitle(item);
+  const image = getWishlistProductImage(item);
+  const meta = getWishlistProductMeta(item);
+  const price = getWishlistProductPrice(item);
+  const href = getWishlistProductHref(item);
 
-function ProductCard({ item }: { item: (typeof wishlist)[number] }) {
   return (
-    <article className="overflow-hidden rounded-[1.5rem] bg-[#fbfaf6]">
-      <img
-        src={item.image}
-        alt={item.name}
-        className="aspect-[4/5] w-full object-cover"
-      />
-      <div className="p-4">
-        <h3 className="font-medium">{item.name}</h3>
-        <p className="mt-1 text-sm text-neutral-500">{item.meta}</p>
-        <p className="mt-3 text-xl font-medium">{item.price}</p>
-        <button className="mt-4 w-full rounded-full bg-neutral-950 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white">
-          Move to cart
+    <article className="group">
+      <div className="relative overflow-hidden bg-[#f3eee6]">
+        <Link href={href} className="block overflow-hidden">
+          {image ? (
+            <img
+              src={image}
+              alt={title}
+              className="aspect-[3/4] w-full object-cover object-top transition duration-700 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex aspect-[3/4] w-full items-center justify-center bg-[#efe5d8] px-4 text-center text-sm text-neutral-500">
+              Backend media missing
+            </div>
+          )}
+        </Link>
+
+        <button
+          type="button"
+          onClick={() => onRemove(item)}
+          disabled={removing}
+          className="absolute right-4 top-4 text-neutral-950 transition hover:scale-110 disabled:cursor-not-allowed disabled:opacity-60"
+          aria-label="Remove from wishlist"
+          title="Remove from wishlist"
+        >
+          {removing ? (
+            <Loader2 className="h-6 w-6 animate-spin" />
+          ) : (
+            <Heart className="h-7 w-7 fill-current stroke-[1.8]" />
+          )}
         </button>
+      </div>
+
+      <div className="pt-4">
+        <Link
+          href={href}
+          className="line-clamp-2 text-[15px] font-semibold leading-6 text-[#15100c] transition hover:text-[#b98262]"
+        >
+          {title}
+        </Link>
+
+        {meta ? (
+          <p className="mt-1 line-clamp-1 text-sm text-neutral-500">
+            {meta}
+          </p>
+        ) : null}
+
+        <p className="mt-3 text-[15px] font-semibold text-[#15100c]">
+          ${price}
+        </p>
+
+        <Link
+          href={href}
+          className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 border border-[#15100c] text-xs font-semibold uppercase tracking-[0.18em] transition hover:bg-[#15100c] hover:text-white"
+        >
+          <ShoppingBag className="h-4 w-4" />
+          View Product
+        </Link>
       </div>
     </article>
   );
@@ -1356,7 +1730,7 @@ function BridalPartiesPanel({ compact = false }: { compact?: boolean }) {
     <Panel
       title="Bridal Parties"
       eyebrow="Group ordering"
-      copy="Static bridal party preview. Backend integration will later connect wedding workspaces and member statuses."
+      copy="Wedding workspaces and member status preview."
     >
       <div className="grid gap-4 md:grid-cols-2">
         {bridalParties.map(([name, date, members, status]) => (
@@ -1370,9 +1744,12 @@ function BridalPartiesPanel({ compact = false }: { compact?: boolean }) {
       </div>
 
       {!compact ? (
-        <button className="mt-5 rounded-full bg-neutral-950 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white">
-          Create bridal party
-        </button>
+        <Link
+          href="/bridal-party"
+          className="mt-5 inline-flex rounded-full bg-neutral-950 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white"
+        >
+          Open bridal party
+        </Link>
       ) : null}
     </Panel>
   );
@@ -1383,15 +1760,15 @@ function ReturnsPanel() {
     <Panel
       title="Returns"
       eyebrow="Returns feedback"
-      copy="Static returns preview. Backend integration will later connect return and fit feedback APIs."
+      copy="Returns, exchanges, and fit feedback preview."
     >
       <div className="grid gap-4 md:grid-cols-2">
-        {returns.map(([title, type, status, signal]) => (
+        {returns.map(([name, type, status, note]) => (
           <InfoTile
-            key={title}
+            key={name}
             icon={<RotateCcw className="h-5 w-5" />}
-            title={title}
-            lines={[type, status, signal]}
+            title={name}
+            lines={[type, status, note]}
           />
         ))}
       </div>
@@ -1403,49 +1780,20 @@ function ResalePanel() {
   return (
     <Panel
       title="Resale Listings"
-      eyebrow="Marketplace"
-      copy="Static resale preview. Backend integration will later connect seller listings, garment measurements, and listing status."
+      eyebrow="Reseller marketplace"
+      copy="Seller listings and garment status preview."
     >
       <div className="grid gap-4 md:grid-cols-2">
-        {resaleListings.map(([title, price, validation, status]) => (
+        {resaleListings.map(([name, price, measurement, status]) => (
           <InfoTile
-            key={title}
+            key={name}
             icon={<Shirt className="h-5 w-5" />}
-            title={title}
-            lines={[price, validation, status]}
+            title={name}
+            lines={[price, measurement, status]}
           />
         ))}
       </div>
-
-      <button className="mt-5 rounded-full bg-neutral-950 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white">
-        Create listing
-      </button>
     </Panel>
-  );
-}
-
-function Panel({
-  eyebrow,
-  title,
-  copy,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  copy: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[1.75rem] bg-white p-5 shadow-sm ring-1 ring-neutral-200 md:p-6">
-      <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">
-        {eyebrow}
-      </p>
-      <h2 className="mt-2 text-3xl font-medium tracking-tight md:text-4xl">
-        {title}
-      </h2>
-      <p className="mt-3 max-w-3xl leading-7 text-neutral-600">{copy}</p>
-      <div className="mt-6">{children}</div>
-    </section>
   );
 }
 
@@ -1459,15 +1807,14 @@ function InfoTile({
   lines: string[];
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-neutral-200 p-5">
-      <div className="mb-4 flex items-center gap-2">
+    <div className="rounded-[1.5rem] bg-[#fbfaf6] p-5 ring-1 ring-neutral-200">
+      <div className="mb-4 grid h-11 w-11 place-items-center rounded-full bg-white">
         {icon}
-        <h3 className="font-medium">{title}</h3>
       </div>
-
-      <div className="grid gap-2">
+      <h3 className="font-medium">{title}</h3>
+      <div className="mt-2 grid gap-1">
         {lines.map((line) => (
-          <p key={line} className="text-sm text-neutral-600">
+          <p key={line} className="text-sm text-neutral-500">
             {line}
           </p>
         ))}
@@ -1476,112 +1823,20 @@ function InfoTile({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[1.5rem] bg-[#f7f2ea] p-5">
-      <p className="text-xs uppercase tracking-[0.16em] text-neutral-500">
-        {label}
-      </p>
-      <p className="mt-2 text-xl font-medium">{value}</p>
-    </div>
-  );
-}
-
 function DarkMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-white/10 p-4">
-      <p className="text-xs uppercase tracking-[0.14em] text-white/50">
+      <p className="text-xs uppercase tracking-[0.16em] text-white/50">
         {label}
       </p>
-      <p className="mt-1 font-medium">{value}</p>
+      <p className="mt-2 font-medium">{value}</p>
     </div>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full bg-[#f7f2ea] px-3 py-1 text-xs font-medium">
-      {children}
-    </span>
-  );
-}
-
-function AuthInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  required = true,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  type?: string;
-  required?: boolean;
-}) {
-  return (
-    <div>
-      <label className="mb-2 block text-sm font-medium">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-2xl border border-neutral-300 bg-[#fbfaf6] px-4 py-3 text-sm outline-none focus:border-neutral-950"
-        placeholder={placeholder}
-        required={required}
-      />
-    </div>
-  );
-}
-
-function NumberInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div>
-      <label className="mb-2 block text-sm font-medium">{label}</label>
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-2xl border border-neutral-300 bg-[#fbfaf6] px-4 py-3 text-sm outline-none focus:border-neutral-950"
-        required
-      />
-    </div>
-  );
-}
-
-function SubmitButton({
-  loading,
-  text,
-  loadingText,
-}: {
-  loading: boolean;
-  text: string;
-  loadingText: string;
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={loading}
-      className="w-full rounded-full bg-neutral-950 px-7 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      {loading ? loadingText : text}
-    </button>
   );
 }
 
 function AccountFlow() {
   return (
-    <section className="bg-[#f7f2ea] py-14">
+    <section className="bg-[#f4efe8] py-14">
       <div className="mx-auto max-w-[1500px] px-4 lg:px-8">
         <div className="mb-8 max-w-3xl">
           <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
@@ -1597,11 +1852,31 @@ function AccountFlow() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-5">
-          <FlowStep icon={<ShoppingBag className="h-5 w-5" />} title="Order" copy="Buy, rent, MTO" />
-          <FlowStep icon={<Ruler className="h-5 w-5" />} title="Fit" copy="Save profile" />
-          <FlowStep icon={<Users className="h-5 w-5" />} title="Party" copy="Coordinate group" />
-          <FlowStep icon={<RefreshCcw className="h-5 w-5" />} title="Gownloop" copy="Rotate closet" />
-          <FlowStep icon={<Shirt className="h-5 w-5" />} title="Resale" copy="List again" />
+          <FlowStep
+            icon={<ShoppingBag className="h-5 w-5" />}
+            title="Order"
+            copy="Buy, rent, MTO"
+          />
+          <FlowStep
+            icon={<Ruler className="h-5 w-5" />}
+            title="Fit"
+            copy="Save profile"
+          />
+          <FlowStep
+            icon={<Users className="h-5 w-5" />}
+            title="Party"
+            copy="Coordinate group"
+          />
+          <FlowStep
+            icon={<RefreshCcw className="h-5 w-5" />}
+            title="Gownloop"
+            copy="Rotate closet"
+          />
+          <FlowStep
+            icon={<Shirt className="h-5 w-5" />}
+            title="Resale"
+            copy="List again"
+          />
         </div>
       </div>
     </section>
@@ -1630,14 +1905,38 @@ function FlowStep({
 
 function ModuleOwnership() {
   const moduleMap = [
-    ["Account", "Customer dashboard, saved data, activity, shortcuts, account-level navigation"],
-    ["Orders", "Order history, order status, checkout history, fulfillment tracking"],
-    ["Rental", "Rental windows, return deadlines, backup sizes, event readiness"],
-    ["Subscription", "Gownloop plan, monthly box, closet management, swap/keep flow"],
-    ["User Profile", "Saved fit profile, measurements, style preferences, saved sizes"],
-    ["Bridal Party", "Wedding workspaces, group orders, member statuses, payment readiness"],
-    ["Returns Feedback", "Return/exchange reasons, fit feedback, style feedback, learning signals"],
-    ["Reseller Marketplace", "Seller listings, garment measurements, condition and listing status"],
+    [
+      "Account",
+      "Customer dashboard, saved data, activity, shortcuts, account-level navigation",
+    ],
+    [
+      "Orders",
+      "Order history, order status, checkout history, fulfillment tracking",
+    ],
+    [
+      "Rental",
+      "Rental windows, return deadlines, backup sizes, event readiness",
+    ],
+    [
+      "Subscription",
+      "Gownloop plan, monthly box, closet management, swap/keep flow",
+    ],
+    [
+      "User Profile",
+      "Saved fit profile, measurements, style preferences, saved sizes",
+    ],
+    [
+      "Bridal Party",
+      "Wedding workspaces, group orders, member statuses, payment readiness",
+    ],
+    [
+      "Returns Feedback",
+      "Return/exchange reasons, fit feedback, style feedback, learning signals",
+    ],
+    [
+      "Reseller Marketplace",
+      "Seller listings, garment measurements, condition and listing status",
+    ],
   ];
 
   return (

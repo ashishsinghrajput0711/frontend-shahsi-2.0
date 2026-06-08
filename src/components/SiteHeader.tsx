@@ -1,28 +1,39 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useWishlist } from "@/components/WishlistProvider";
 import {
   ChevronRight,
   Heart,
+  Loader2,
   Menu,
   Search,
   ShoppingBag,
   User,
+  XCircle,
 } from "lucide-react";
 
 import { getCart } from "@/lib/api/cart.api";
 import {
   getCatalogCategoryTree,
+  unwrapCatalogCategoryTree,
   type CatalogCategoryTreeNode,
 } from "@/lib/api/catalog.api";
+
 import {
   findCategoryBySlug,
   getCategoryHref,
-  getCategoryImage,
   getCategorySlug,
-  getCategoryTreeArray,
-  parseTopMenu,
 } from "@/lib/category-tree.utils";
+
+import {
+  getSearchProductHref,
+  getSearchProductImage,
+  getSearchProductTitle,
+  searchProducts,
+  unwrapSearchResults,
+  type SearchProduct,
+} from "@/lib/api/search.api";
 
 function getSafeCartItems(response: any): any[] {
   if (Array.isArray(response)) return response;
@@ -46,16 +57,165 @@ function getPublicProductCount(node?: CatalogCategoryTreeNode | null) {
   return null;
 }
 
+
+type SearchCategorySuggestion = {
+  id: string;
+  name: string;
+  slug: string;
+  path: string;
+  href: string;
+  breadcrumb: string[];
+  imageUrl: string;
+  productCount: number;
+  directProductCount: number;
+  level: number;
+  score: number;
+};
+
+function normalizeSearchText(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[-_/]+/g, " ")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function flattenCategoryTreeForSearch(
+  nodes: CatalogCategoryTreeNode[] = []
+): SearchCategorySuggestion[] {
+  const items: SearchCategorySuggestion[] = [];
+
+  nodes.forEach((node) => {
+    if (!node || node.isActive === false) return;
+
+    const id = String(node.id || "").trim();
+    const name = String(node.name || "").trim();
+    const slug = String(node.slug || "").trim();
+
+    const rawPath = Array.isArray(node.path)
+      ? node.path.join("/")
+      : String(node.path || slug).trim();
+
+    const path = rawPath.replace(/^\/+|\/+$/g, "");
+    const href = String(node.url || (path ? `/${path}` : "")).trim();
+
+    const breadcrumb = Array.isArray(node.breadcrumb)
+      ? node.breadcrumb.filter(Boolean).map(String)
+      : name
+        ? [name]
+        : [];
+
+    if (id && name && slug && href) {
+      items.push({
+        id,
+        name,
+        slug,
+        path,
+        href,
+        breadcrumb,
+        imageUrl: String(node.imageUrl || "").trim(),
+        productCount:
+          typeof node.productCount === "number" ? node.productCount : 0,
+        directProductCount:
+          typeof node.directProductCount === "number"
+            ? node.directProductCount
+            : 0,
+        level: typeof node.level === "number" ? node.level : breadcrumb.length,
+        score: 0,
+      });
+    }
+
+    if (Array.isArray(node.children) && node.children.length) {
+      items.push(...flattenCategoryTreeForSearch(node.children));
+    }
+  });
+
+  return items;
+}
+
+function getMatchedSearchCategories(
+  categoryTree: CatalogCategoryTreeNode[],
+  query: string
+) {
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) return [];
+
+  const queryWords = normalizedQuery.split(" ").filter(Boolean);
+  const categories = flattenCategoryTreeForSearch(categoryTree);
+
+  return categories
+    .map((category) => {
+      const normalizedName = normalizeSearchText(category.name);
+      const normalizedSlug = normalizeSearchText(category.slug);
+      const normalizedPath = normalizeSearchText(category.path);
+      const normalizedBreadcrumb = normalizeSearchText(
+        category.breadcrumb.join(" ")
+      );
+
+      const searchableText = [
+        normalizedName,
+        normalizedSlug,
+        normalizedPath,
+        normalizedBreadcrumb,
+      ].join(" ");
+
+      let score = 0;
+
+      if (normalizedName === normalizedQuery) score += 100;
+      if (normalizedSlug === normalizedQuery) score += 95;
+      if (normalizedPath === normalizedQuery) score += 90;
+
+      if (normalizedName.startsWith(normalizedQuery)) score += 70;
+      if (normalizedSlug.startsWith(normalizedQuery)) score += 65;
+
+      if (searchableText.includes(normalizedQuery)) score += 50;
+
+      if (queryWords.every((word) => searchableText.includes(word))) {
+        score += 30;
+      }
+
+      if (category.productCount > 0) score += 10;
+
+      return {
+        ...category,
+        score,
+      };
+    })
+    .filter((category) => category.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+
+      if (b.productCount !== a.productCount) {
+        return b.productCount - a.productCount;
+      }
+
+      return a.level - b.level;
+    })
+    .slice(0, 6);
+}
+
 export default function SiteHeader() {
+  const { count: wishlistCount, refreshWishlistCount } = useWishlist();
+
   const [cartCount, setCartCount] = useState(0);
   const [showTopStrip, setShowTopStrip] = useState(true);
 
   const [categoryTree, setCategoryTree] = useState<CatalogCategoryTreeNode[]>(
     [],
   );
+
   const [activeCategorySlug, setActiveCategorySlug] = useState<string | null>(
     null,
   );
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchProduct[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const showTopStripRef = useRef(true);
   const lastScrollYRef = useRef(0);
@@ -65,6 +225,10 @@ export default function SiteHeader() {
 
     return findCategoryBySlug(categoryTree, activeCategorySlug);
   }, [activeCategorySlug, categoryTree]);
+
+  const searchCategorySuggestions = useMemo(() => {
+  return getMatchedSearchCategories(categoryTree, searchQuery);
+}, [categoryTree, searchQuery]);
 
   async function loadCartCount() {
     try {
@@ -83,15 +247,19 @@ export default function SiteHeader() {
 
   async function loadCategoryTree() {
     try {
-      const response = await getCatalogCategoryTree();
-      const tree = getCategoryTreeArray(response);
+     const response = await getCatalogCategoryTree();
+const tree = unwrapCatalogCategoryTree(response);
 
-      setCategoryTree(tree);
+setCategoryTree(tree);
     } catch (error) {
       console.error("Header category tree load failed:", error);
       setCategoryTree([]);
     }
   }
+
+  useEffect(() => {
+    refreshWishlistCount();
+  }, [refreshWishlistCount]);
 
   useEffect(() => {
     loadCartCount();
@@ -109,6 +277,39 @@ export default function SiteHeader() {
       window.removeEventListener("focus", handleCartUpdated);
     };
   }, []);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+
+    if (!query) {
+      setSearchResults([]);
+      setSearchError("");
+      setSearchOpen(false);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        setSearchError("");
+        setSearchOpen(true);
+
+        const response = await searchProducts(query);
+        const results = unwrapSearchResults(response);
+
+        setSearchResults(results);
+      } catch (error: any) {
+        console.error("Search failed:", error);
+        setSearchResults([]);
+        setSearchError(error?.message || "Search API failed.");
+        setSearchOpen(true);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     lastScrollYRef.current = window.scrollY;
@@ -160,6 +361,26 @@ export default function SiteHeader() {
     };
   }, []);
 
+  function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+
+  const query = searchQuery.trim();
+
+  if (!query) return;
+
+  if (searchCategorySuggestions.length) {
+    window.location.href = searchCategorySuggestions[0].href;
+    return;
+  }
+
+  if (searchResults.length) {
+    window.location.href = getSearchProductHref(searchResults[0]);
+    return;
+  }
+
+  setSearchOpen(true);
+}
+
   return (
     <>
       <header
@@ -177,8 +398,8 @@ export default function SiteHeader() {
         >
           <div className="flex h-[30px] items-center justify-between px-6 text-[9px] uppercase tracking-[0.25em] lg:px-10">
             <p className="hidden md:block">
-              Complimentary shipping on orders over $250 · Try at home with resale
-              & rent
+              Complimentary shipping on orders over $250 · Try at home with
+              resale & rent
             </p>
 
             <nav className="ml-auto flex items-center gap-4 lg:gap-6">
@@ -200,10 +421,7 @@ export default function SiteHeader() {
 
               <span className="text-white/35">|</span>
 
-              <a
-                href="/made-to-order"
-                className="transition hover:text-[#d4b49a]"
-              >
+              <a href="/mto" className="transition hover:text-[#d4b49a]">
                 Made to Order
               </a>
             </nav>
@@ -229,16 +447,179 @@ export default function SiteHeader() {
             </a>
           </div>
 
-          <div className="hidden w-full items-center md:flex">
+          <form
+            onSubmit={handleSearchSubmit}
+            className="relative flex h-[58px] w-full max-w-[860px] border border-[#d8cfc2] bg-white"
+          >
             <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onFocus={() => {
+                if (searchQuery.trim()) setSearchOpen(true);
+              }}
               placeholder="evening gowns, bridal, sizes..."
-              className="h-[48px] flex-1 border border-[#d8d0c4] bg-white px-[22px] text-[14px] font-light outline-none placeholder:text-[#aaa39b]"
+              className="h-full flex-1 bg-white px-6 text-[15px] text-[#15100c] outline-none placeholder:text-[#aaa39c]"
             />
 
-            <button className="flex h-[48px] w-[60px] items-center justify-center bg-[#15100c] text-white transition hover:bg-[#b98262]">
-              <Search className="h-[20px] w-[20px] stroke-[1.7]" />
+            <button
+              type="submit"
+              className="grid h-full w-[82px] place-items-center bg-[#15100c] text-white transition hover:bg-[#b98262]"
+              aria-label="Search products"
+            >
+              {searchLoading ? (
+                <Loader2 className="h-6 w-6 animate-spin" />
+              ) : (
+                <Search className="h-6 w-6 stroke-[1.8]" />
+              )}
             </button>
-          </div>
+
+            {searchOpen ? (
+              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-[1000] max-h-[430px] overflow-y-auto border border-[#d8cfc2] bg-white shadow-[0_22px_70px_rgba(23,17,13,0.18)]">
+                <div className="flex items-center justify-between border-b border-[#eee8df] px-5 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8a8178]">
+                    Search Results
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => setSearchOpen(false)}
+                    className="text-[12px] uppercase tracking-[0.18em] text-[#15100c] hover:text-[#b98262]"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {searchLoading ? (
+                  <div className="flex items-center gap-3 px-5 py-5 text-sm text-[#6d6760]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Searching backend...
+                  </div>
+                ) : null}
+
+                {searchError ? (
+                  <div className="flex items-start gap-3 px-5 py-5 text-sm text-red-700">
+                    <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{searchError}</span>
+                  </div>
+                ) : null}
+
+               {!searchLoading &&
+!searchError &&
+!searchCategorySuggestions.length &&
+!searchResults.length ? (
+  <div className="px-5 py-5 text-sm text-[#6d6760]">
+    No categories or products found for <strong>{searchQuery}</strong>.
+  </div>
+) : null}
+
+{!searchLoading && !searchError && searchCategorySuggestions.length ? (
+  <div className="border-b border-[#eee8df]">
+    <div className="px-5 pb-2 pt-4">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#8a8178]">
+        Matching Categories
+      </p>
+    </div>
+
+    <div className="grid">
+      {searchCategorySuggestions.map((category) => {
+        const breadcrumbText = category.breadcrumb.join(" / ");
+
+        return (
+          <a
+            key={`search-category-${category.id}`}
+            href={category.href}
+            className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-4 border-t border-[#f5efe7] px-5 py-3 transition hover:bg-[#fbf8f1]"
+          >
+          <div className="h-[52px] w-[52px] overflow-hidden rounded-full bg-[#efe8de]">
+              {category.imageUrl ? (
+                <img
+                  src={category.imageUrl}
+                  alt={category.name}
+                  className="h-full w-full object-cover object-top"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[16px] font-serif text-[#15100c]">
+                  {category.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <p className="truncate text-[14px] font-semibold text-[#15100c]">
+                {category.name}
+              </p>
+
+              <p className="mt-1 truncate text-[12px] text-[#8a8178]">
+                {breadcrumbText}
+                {category.productCount > 0
+                  ? ` • ${category.productCount} products`
+                  : ""}
+              </p>
+            </div>
+
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#b98262]">
+              View
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  </div>
+) : null}
+
+                {!searchLoading && !searchError && searchResults.length ? (
+                <div className="grid">
+  <div className="px-5 pb-2 pt-4">
+    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#8a8178]">
+      Matching Products
+    </p>
+  </div>
+
+  {searchResults.map((product) => {
+                      const title = getSearchProductTitle(product);
+                      const image = getSearchProductImage(product);
+                      const href = getSearchProductHref(product);
+
+                      return (
+                        <a
+                          key={product.id || product.productId || title}
+                          href={href}
+                         className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-4 border-b border-[#f0ebe4] px-5 py-4 transition hover:bg-[#fbf8f1]"
+                        >
+                          <div className="h-16 w-16 overflow-hidden bg-[#eee8df]">
+                            {image ? (
+                              <img
+                                src={image}
+                                alt={title}
+                                className="h-full w-full object-cover object-top"
+                              />
+                            ) : (
+                             <div className="flex h-full w-full items-center justify-center bg-[#efe8de] px-2 text-center text-[9px] uppercase tracking-[0.12em] text-[#8a8178]">
+  Image missing
+</div>
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="truncate text-[14px] font-semibold text-[#15100c]">
+                              {title}
+                            </p>
+
+                            <p className="mt-1 truncate text-[12px] text-[#8a8178]">
+                              {product.brand ? `${product.brand} • ` : ""}
+                              {product.category || "Category missing"}
+                            </p>
+                          </div>
+
+                        
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </form>
 
           <div className="hidden items-center justify-end gap-[24px] lg:flex">
             <a href="/account" className="transition hover:text-[#b98262]">
@@ -247,8 +628,15 @@ export default function SiteHeader() {
 
             <a href="/wishlist" className="transition hover:text-[#b98262]">
               <IconCounter
-                count={0}
-                icon={<Heart className="h-[23px] w-[23px] stroke-[1.5]" />}
+                count={wishlistCount}
+                icon={
+                  <Heart
+                    className={[
+                      "h-[23px] w-[23px] stroke-[1.5]",
+                      wishlistCount > 0 ? "fill-[#15100c]" : "",
+                    ].join(" ")}
+                  />
+                }
               />
             </a>
 
@@ -262,7 +650,7 @@ export default function SiteHeader() {
             </a>
           </div>
 
-          <button className="ml-auto lg:hidden">
+          <button type="button" className="ml-auto lg:hidden">
             <Menu className="h-6 w-6" />
           </button>
         </div>
@@ -298,20 +686,9 @@ export default function SiteHeader() {
               );
             })
           ) : (
-            <>
-              <a href="/collection" className="transition hover:text-[#15100c]">
-                New In
-              </a>
-              <a href="/collection" className="transition hover:text-[#15100c]">
-                Evening
-              </a>
-              <a
-                href="/bridesmaid"
-                className="text-[#b98262] transition hover:text-[#15100c]"
-              >
-                Bridesmaid
-              </a>
-            </>
+            <span className="text-[11px] uppercase tracking-[0.24em] text-red-600">
+              Category menu backend se nahi aaya
+            </span>
           )}
         </nav>
 
