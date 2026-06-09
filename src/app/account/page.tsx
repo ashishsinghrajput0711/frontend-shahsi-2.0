@@ -869,44 +869,36 @@ function AuthCard({
           parties, returns, resale listings, and Gownloop lifecycle.
         </p>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2">
-          <DarkMetric label="Fit intelligence" value="Profile" />
-          <DarkMetric label="Shopping flow" value="Wishlist" />
-          <DarkMetric label="Lifecycle" value="Orders" />
-          <DarkMetric label="Group" value="Bridal" />
-        </div>
       </div>
 
       <div className="p-8 md:p-12">
-        <div className="mb-8 flex rounded-full bg-[#f4efe8] p-1 text-sm">
-          <button
-            type="button"
-            onClick={() => setAuthMode("login")}
-            className={`flex-1 rounded-full px-4 py-3 ${
-              authMode === "login" ? "bg-white shadow-sm" : ""
-            }`}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            onClick={() => setAuthMode("signup")}
-            className={`flex-1 rounded-full px-4 py-3 ${
-              authMode === "signup" ? "bg-white shadow-sm" : ""
-            }`}
-          >
-            Signup
-          </button>
-          <button
-            type="button"
-            onClick={() => setAuthMode("forgot")}
-            className={`flex-1 rounded-full px-4 py-3 ${
-              authMode === "forgot" ? "bg-white shadow-sm" : ""
-            }`}
-          >
-            Forgot
-          </button>
-        </div>
+       <div className="mb-8 grid grid-cols-2 rounded-full bg-[#f4efe8] p-1 text-sm">
+  <button
+    type="button"
+    onClick={() => setAuthMode("login")}
+    className={[
+      "h-[52px] rounded-full px-4 font-medium transition",
+      authMode === "login" || authMode === "forgot"
+        ? "bg-white text-[#15100c] shadow-sm"
+        : "text-[#15100c] hover:bg-white/50",
+    ].join(" ")}
+  >
+    Login
+  </button>
+
+  <button
+    type="button"
+    onClick={() => setAuthMode("signup")}
+    className={[
+      "h-[52px] rounded-full px-4 font-medium transition",
+      authMode === "signup"
+        ? "bg-white text-[#15100c] shadow-sm"
+        : "text-[#15100c] hover:bg-white/50",
+    ].join(" ")}
+  >
+    Signup
+  </button>
+</div>
 
         {authError ? (
           <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -938,6 +930,19 @@ function AuthCard({
                 setLoginForm((prev) => ({ ...prev, password: value }))
               }
             />
+
+            <div className="-mt-1 flex justify-end">
+  <button
+    type="button"
+    onClick={() => {
+      setForgotForm({ email: loginForm.email });
+      setAuthMode("forgot");
+    }}
+    className="text-[11px] font-semibold uppercase tracking-[0.20em] text-[#7a746e] transition hover:text-[#15100c]"
+  >
+    Forgot Password?
+  </button>
+</div>
 
             <button
               type="submit"
@@ -1008,6 +1013,14 @@ function AuthCard({
             >
               {authLoading ? "Please wait..." : "Send reset link"}
             </button>
+
+            <button
+  type="button"
+  onClick={() => setAuthMode("login")}
+  className="inline-flex h-11 items-center justify-center rounded-full border border-[#d8d0c4] bg-white px-6 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#15100c] transition hover:border-[#15100c]"
+>
+  Back to Login
+</button>
           </form>
         ) : null}
       </div>
