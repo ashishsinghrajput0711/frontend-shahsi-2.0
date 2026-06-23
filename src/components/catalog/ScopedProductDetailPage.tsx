@@ -1341,7 +1341,7 @@ thumbnail: readFirst(item.thumbnail, item.imageUrl, item.image),
       catalogProductId: readFirst(item.catalogProductId),
       title: readFirst(item.title, item.name),
       name: readFirst(item.name, item.title),
-      slug: readFirst(item.slug),
+      
       price:
         item.price ??
         item.salePrice ??
@@ -1355,7 +1355,7 @@ thumbnail: readFirst(item.thumbnail, item.imageUrl, item.image),
       resalePrice: item.resalePrice,
       imageUrl: readFirst(item.imageUrl, item.image, item.thumbnail),
       image: readFirst(item.image),
-      thumbnail: readFirst(item.thumbnail),
+     
       categoryName: readFirst(item.categoryName),
       categorySlug: readFirst(item.categorySlug),
       color: readFirst(item.color, item.primaryColor, item.variantColor),
