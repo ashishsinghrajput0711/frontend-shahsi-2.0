@@ -153,6 +153,7 @@ breadcrumb?: any[];
   sleeveLength?: string;
   images: ProductImage[];
   colors: ProductColor[];
+  similarStyleProductDetails: RelatedProductCard[];
   sizes: ProductSize[];
   variants: CatalogVariant[];
   fabricOptions: FabricOption[];
@@ -174,6 +175,9 @@ type ProductDetailRow = {
 };
 
 type RelatedProductCard = {
+  status?: string;
+isCurrent?: boolean;
+colorFamily?: string;
   id?: string;
   productId?: string;
   catalogProductId?: string;
@@ -319,6 +323,50 @@ function normalizeCompare(value?: string) {
   return normalizeText(value);
 }
 
+
+const SIZE_ORDER = [
+  "xxxs",
+  "xxs",
+  "xs",
+  "s",
+  "m",
+  "l",
+  "xl",
+  "xxl",
+  "xxxl",
+  "custom",
+];
+
+const SIZE_LABEL_MAP: Record<string, string> = {
+  xxxs: "XXXS",
+  xxs: "XXS",
+  xs: "XS",
+  s: "S",
+  m: "M",
+  l: "L",
+  xl: "XL",
+  xxl: "XXL",
+  xxxl: "XXXL",
+  custom: "Custom",
+};
+
+function formatSizeLabel(value: any) {
+  const label = readFirst(value);
+
+  if (!label) return "";
+
+  const normalized = normalizeText(label);
+
+  return SIZE_LABEL_MAP[normalized] || label.trim().toUpperCase();
+}
+
+function getSizeRank(label: any) {
+  const normalized = normalizeText(label);
+  const index = SIZE_ORDER.indexOf(normalized);
+
+  return index === -1 ? 999 : index;
+}
+
 function normalizeHex(value?: string) {
   const text = readFirst(value);
 
@@ -435,6 +483,35 @@ function getRawProduct(response: any) {
 
 function getProductId(product: any) {
   return readFirst(product?.id, product?.productId, product?.catalogProductId);
+}
+
+
+
+
+
+
+function isUuidValue(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
+async function fetchCatalogProductBySlugOrId(productSlugOrId: string) {
+  const cleanValue = readFirst(productSlugOrId);
+
+  if (!cleanValue) {
+    throw new Error("Product slug/id missing.");
+  }
+
+  if (isUuidValue(cleanValue)) {
+    return apiRequest<any>(`/catalog/${encodeURIComponent(cleanValue)}`, {
+      method: "GET",
+    });
+  }
+
+  return apiRequest<any>(`/catalog/slug/${encodeURIComponent(cleanValue)}`, {
+    method: "GET",
+  });
 }
 
 function getVariantId(variant?: any | null) {
@@ -805,7 +882,7 @@ function getColors(product: any): ProductColor[] {
     }
   });
 
-  return Array.from(unique.values());
+return Array.from(unique.values());
 }
 
 function getSizes(product: any): ProductSize[] {
@@ -859,7 +936,19 @@ function getSizes(product: any): ProductSize[] {
     }
   });
 
-  return Array.from(unique.values());
+ return Array.from(unique.values())
+  .map((size) => ({
+    ...size,
+    label: formatSizeLabel(size.label),
+  }))
+  .sort((a, b) => {
+    const aRank = getSizeRank(a.label);
+    const bRank = getSizeRank(b.label);
+
+    if (aRank !== bRank) return aRank - bRank;
+
+    return a.label.localeCompare(b.label);
+  });
 }
 
 function getFabricOptions(product: any): FabricOption[] {
@@ -1064,9 +1153,15 @@ breadcrumb: Array.isArray(rawProduct?.breadcrumb)
       rawProduct?.tabShippingReturns,
       rawProduct?.returnText
     ),
-    sizeGuide: rawProduct?.sizeGuide,
+       sizeGuide: rawProduct?.sizeGuide,
     rating: Number(rawProduct?.rating || rawProduct?.reviewsAverage || 0),
-    reviewsCount: Number(rawProduct?.reviewsCount || rawProduct?.reviewsTotal || rawProduct?.reviewCount || 0),
+    reviewsCount: Number(
+      rawProduct?.reviewsCount ||
+        rawProduct?.reviewsTotal ||
+        rawProduct?.reviewCount ||
+        0
+    ),
+    similarStyleProductDetails: getSimilarStyleProducts(rawProduct),
     raw: rawProduct,
   };
 }
@@ -1235,6 +1330,12 @@ function normalizeRelatedProducts(value: any): RelatedProductCard[] {
   return value
     .filter((item) => item && typeof item === "object")
     .map((item) => ({
+
+      slug: readFirst(item.slug, item.productSlug, item.handle),
+status: readFirst(item.status, item.adminStatus, item.statusLabel),
+isCurrent: Boolean(item.isCurrent),
+colorFamily: readFirst(item.colorFamily),
+thumbnail: readFirst(item.thumbnail, item.imageUrl, item.image),
       id: readFirst(item.id, item.productId, item.catalogProductId),
       productId: readFirst(item.productId, item.id, item.catalogProductId),
       catalogProductId: readFirst(item.catalogProductId),
@@ -1278,13 +1379,36 @@ function parseMaybeJsonArray(value: any): any[] {
 }
 
 function getSimilarColorProducts(rawProduct: any): RelatedProductCard[] {
+ const sources = [
+  rawProduct?.similarColorProductDetails,
+  rawProduct?.similarColorProductCards,
+  rawProduct?.similarColorProducts,
+  rawProduct?.similarColorProductDetails?.data,
+  rawProduct?.similarColorProductCards?.data,
+  rawProduct?.similarColorProducts?.data,
+  rawProduct?.metafields?.similarColorProductDetails,
+  rawProduct?.metafields?.similarColorProductCards,
+  rawProduct?.metafields?.similarColorProducts,
+];
+
+  for (const source of sources) {
+    const normalized = normalizeRelatedProducts(parseMaybeJsonArray(source));
+    if (normalized.length) return normalized;
+  }
+
+  return [];
+}
+
+function getSimilarStyleProducts(rawProduct: any): RelatedProductCard[] {
   const sources = [
-    rawProduct?.similarColorProductCards,
-    rawProduct?.similarColorProducts,
-    rawProduct?.similarColorProductCards?.data,
-    rawProduct?.similarColorProducts?.data,
-    rawProduct?.metafields?.similarColorProductCards,
-    rawProduct?.metafields?.similarColorProducts,
+    rawProduct?.similarStyleProductDetails,
+    rawProduct?.similarStyleProducts,
+    rawProduct?.similarStyleProduct,
+    rawProduct?.similarStyleProductDetails?.data,
+    rawProduct?.similarStyleProducts?.data,
+    rawProduct?.metafields?.similarStyleProductDetails,
+    rawProduct?.metafields?.similarStyleProducts,
+    rawProduct?.metafields?.similarStyleProduct,
   ];
 
   for (const source of sources) {
@@ -1293,6 +1417,74 @@ function getSimilarColorProducts(rawProduct: any): RelatedProductCard[] {
   }
 
   return [];
+}
+
+function getSwatchProductLabel(product: RelatedProductCard) {
+  const color = readFirst(
+    product.color,
+    product.primaryColor,
+    product.variantColor
+  );
+
+  if (color && !/^#[0-9a-f]{6}$/i.test(color)) {
+    return color;
+  }
+
+  const colorFamily = readFirst(product.colorFamily);
+
+  if (colorFamily && !/^#[0-9a-f]{6}$/i.test(colorFamily)) {
+    return colorFamily;
+  }
+
+  return "";
+}
+
+function getSwatchProductHex(product: RelatedProductCard) {
+  const hex = readFirst(product.colorHex);
+
+  if (/^#[0-9a-f]{6}$/i.test(hex)) {
+    return hex.toLowerCase();
+  }
+
+  const label = getSwatchProductLabel(product);
+
+  return normalizeHex(label);
+}
+
+function getSwatchProductHref(product: RelatedProductCard, categoryPath: string) {
+  const slugOrId = readFirst(product.slug, product.id, product.productId);
+
+  if (!slugOrId) return "";
+
+  const cleanPath = String(categoryPath || "")
+    .replace(/^\/+|\/+$/g, "")
+    .trim();
+
+  return cleanPath
+    ? `/${cleanPath}/${encodeURIComponent(slugOrId)}`
+    : `/products/${encodeURIComponent(slugOrId)}`;
+}
+
+function getSelectedColorLabel(product: DetailProduct) {
+  const color = readFirst(
+    product.color,
+    product.raw?.primaryColor,
+    product.raw?.variantColor
+  );
+
+  if (color && !/^#[0-9a-f]{6}$/i.test(color)) {
+    return color;
+  }
+
+  const currentSwatch = product.similarStyleProductDetails?.find(
+    (item) => item.isCurrent
+  );
+
+  if (currentSwatch) {
+    return getSwatchProductLabel(currentSwatch);
+  }
+
+  return "";
 }
 
 function getSimilarColorProductIds(rawProduct: any) {
@@ -1708,33 +1900,8 @@ if (!cleanProductId) {
   throw new Error("Product slug/id missing in product URL.");
 }
 
-let response: any = null;
-
-try {
-  response = await apiRequest<any>(
-    `/catalog/slug/${encodeURIComponent(cleanProductId)}`,
-    {
-      method: "GET",
-    },
-  );
-} catch (slugError: any) {
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      cleanProductId,
-    );
-
-  if (!isUuid) {
-    throw slugError;
-  }
-
-  response = await apiRequest<any>(
-    `/catalog/${encodeURIComponent(cleanProductId)}`,
-    {
-      method: "GET",
-    },
-  );
-}
-        const rawProduct = getRawProduct(response);
+const response = await fetchCatalogProductBySlugOrId(cleanProductId);
+const rawProduct = getRawProduct(response);
 
         if (!isPublicVisibleProduct(rawProduct)) {
           if (!mounted) return;
@@ -1764,18 +1931,15 @@ try {
           mappedProduct.fabricOptions.find((item) => item.selected)?.label ||
           mappedProduct.fabricOptions[0]?.label ||
           "";
-        const firstSize = mappedProduct.sizes[0]?.label || "";
+    const firstSize =
+  mappedProduct.sizes.find((size) => size.available !== false)?.label ||
+  mappedProduct.sizes[0]?.label ||
+  "";
         const firstDelivery = mappedProduct.deliveryOptions[0]?.id || "";
         const firstSizeGuideTab =
           getSizeGuideTabs(mappedProduct.sizeGuide)[0]?.id || "";
 
-        setProduct(mappedProduct);
-        setSelectedImage(firstImage);
-        setSelectedColor(firstColor);
-        setSelectedFabric(selectedFabricOption);
-        setSelectedSize(firstSize);
-        setSelectedDelivery(firstDelivery);
-        setActiveSizeGuideTab(firstSizeGuideTab);
+       
 
         setProduct(mappedProduct);
 setSelectedImage(firstImage);
@@ -1793,18 +1957,17 @@ if (hydratedSimilarColorProducts.length) {
   const similarIds = getSimilarColorProductIds(rawProduct);
 
   if (similarIds.length) {
-    const relatedResults = await Promise.allSettled(
-      similarIds.map(async (id) => {
-       const relatedResponse = await apiRequest<any>(
-  `/catalog/slug/${encodeURIComponent(id)}`,
-  {
-    method: "GET",
-  },
+   const relatedResults = await Promise.allSettled(
+  similarIds.map(async (id) => {
+    try {
+      const relatedResponse = await fetchCatalogProductBySlugOrId(id);
+      const relatedRaw = getRawProduct(relatedResponse);
+      return mapRawProductToRelatedCard(relatedRaw);
+    } catch {
+      return null;
+    }
+  })
 );
-        const relatedRaw = getRawProduct(relatedResponse);
-        return mapRawProductToRelatedCard(relatedRaw);
-      })
-    );
 
     const relatedCards = relatedResults
       .map((result) => {
@@ -2669,118 +2832,172 @@ onMouseMove={(event) => {
                   </div>
                 ) : null}
 
-                {product.colors.length ? (
-                  <div>
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-[11px] uppercase tracking-[0.32em] text-[#8b867f]">
-                        Color
-                      </p>
+               {product.similarStyleProductDetails.length ? (
+  <div>
+    <div className="mb-3 flex items-center justify-between">
+      <p className="text-[11px] uppercase tracking-[0.32em] text-[#8b867f]">
+        Color
+      </p>
 
-                      <p className="text-[13px] text-[#15100c]">
-                        {selectedColor}
-                      </p>
-                    </div>
+      {getSelectedColorLabel(product) ? (
+        <p className="max-w-[260px] truncate text-[13px] text-[#15100c]">
+          {getSelectedColorLabel(product)}
+        </p>
+      ) : null}
+    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setColorDropdownOpen((value) => !value)}
-                      className="flex h-[52px] w-full items-center justify-between border border-[#15100c] bg-white px-4 text-left transition hover:shadow-[0_10px_24px_rgba(23,17,13,0.08)]"
-                    >
-                      <span className="flex items-center gap-3">
-                        <span
-                          className="h-[26px] w-[26px] rounded-full border border-[#d8d0c4]"
-                          style={{
-                            backgroundColor:
-                              selectedColorObject?.hex ||
-                              normalizeHex(selectedColor),
-                          }}
-                        />
+    <div className="flex flex-wrap gap-x-[14px] gap-y-[16px]">
+      {product.similarStyleProductDetails
+        .filter((swatchProduct) => {
+          const label = getSwatchProductLabel(swatchProduct);
+          const hex = getSwatchProductHex(swatchProduct);
 
-                        <span className="text-[14px] font-semibold text-[#15100c]">
-                          {selectedColor || "Select color"}
-                        </span>
-                      </span>
+          return Boolean(label && hex);
+        })
+        .map((swatchProduct, index) => {
+          const active = Boolean(swatchProduct.isCurrent);
+          const label = getSwatchProductLabel(swatchProduct);
+          const hex = getSwatchProductHex(swatchProduct);
+          const href = getSwatchProductHref(swatchProduct, cleanCategoryPath);
 
-                      <ChevronDown
-                        className={[
-                          "h-5 w-5 transition",
-                          colorDropdownOpen ? "rotate-180" : "",
-                        ].join(" ")}
-                      />
-                    </button>
+          return (
+            <button
+              key={`style-swatch-${
+                swatchProduct.id || swatchProduct.slug || label || index
+              }`}
+              type="button"
+              onClick={() => {
+                if (!href || active) return;
+                router.push(href);
+              }}
+              className={[
+                "group relative flex h-[42px] w-[42px] items-center justify-center rounded-full border bg-white transition-all duration-300 hover:scale-110",
+                active
+                  ? "border-[#15100c] ring-2 ring-[#15100c] ring-offset-2"
+                  : "border-[#dfd7cc] hover:border-[#15100c]",
+              ].join(" ")}
+              title={label}
+              aria-label={`View ${label}`}
+            >
+              <span
+                className="block h-[34px] w-[34px] rounded-full border border-[#d8d0c4]"
+                style={{
+                  backgroundColor: hex,
+                }}
+              />
 
-                    {colorDropdownOpen ? (
-                      <div className="mt-2 animate-[fadeUpProduct_300ms_ease_both] border border-[#ddd5c9] bg-white p-4 shadow-[0_18px_45px_rgba(23,17,13,0.14)]">
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                          {product.colors.map((color) => (
-                            <button
-                              key={`dropdown-${color.id || color.name}`}
-                              type="button"
-                              onClick={() => {
-                                setSelectedColor(color.name);
-                                setColorDropdownOpen(false);
-                              }}
-                              disabled={color.available === false}
-                              className="flex items-center gap-2 px-2 py-2 text-left text-[13px] transition hover:bg-[#f7f1e8] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <span
-                                className="h-5 w-5 rounded-full border border-[#cfc6ba]"
-                                style={{
-                                  backgroundColor:
-                                    color.hex || normalizeHex(color.name),
-                                }}
-                              />
+              <span className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-full bg-[#15100c] px-3 py-1 text-[10px] font-semibold text-white shadow-[0_12px_24px_rgba(23,17,13,0.18)] group-hover:block">
+                {label}
+              </span>
+            </button>
+          );
+        })}
+    </div>
+  </div>
+) : product.colors.length ? (
+  <div>
+    <div className="mb-3 flex items-center justify-between">
+      <p className="text-[11px] uppercase tracking-[0.32em] text-[#8b867f]">
+        Color
+      </p>
 
-                              {color.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+      <p className="text-[13px] text-[#15100c]">{selectedColor}</p>
+    </div>
 
-                    <div className="mt-4 grid grid-cols-8 gap-x-[12px] gap-y-[14px] sm:grid-cols-10">
-                      {product.colors.map((color, index) => {
-                        const active =
-                          normalizeCompare(color.name) ===
-                          normalizeCompare(selectedColor);
+    <button
+      type="button"
+      onClick={() => setColorDropdownOpen((value) => !value)}
+      className="flex h-[52px] w-full items-center justify-between border border-[#15100c] bg-white px-4 text-left transition hover:shadow-[0_10px_24px_rgba(23,17,13,0.08)]"
+    >
+      <span className="flex items-center gap-3">
+        <span
+          className="h-[26px] w-[26px] rounded-full border border-[#d8d0c4]"
+          style={{
+            backgroundColor:
+              selectedColorObject?.hex || normalizeHex(selectedColor),
+          }}
+        />
 
-                        return (
-                          <button
-                            key={`${color.id || color.name}-${index}`}
-                            type="button"
-                            onClick={() => setSelectedColor(color.name)}
-                            disabled={color.available === false}
-                            className={[
-                              "group relative flex h-[34px] w-[34px] items-center justify-center rounded-full border transition-all duration-300 hover:scale-110",
-                              active
-                                ? "border-[#15100c] ring-2 ring-[#15100c] ring-offset-2"
-                                : "border-[#dfd7cc]",
-                              color.available === false
-                                ? "cursor-not-allowed opacity-50"
-                                : "",
-                            ].join(" ")}
-                            title={color.name}
-                          >
-                            <span
-                              className="block h-full w-full rounded-full"
-                              style={{
-                                backgroundColor:
-                                  color.hex || normalizeHex(color.name),
-                              }}
-                            />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+        <span className="text-[14px] font-semibold text-[#15100c]">
+          {selectedColor || "Select color"}
+        </span>
+      </span>
+
+      <ChevronDown
+        className={[
+          "h-5 w-5 transition",
+          colorDropdownOpen ? "rotate-180" : "",
+        ].join(" ")}
+      />
+    </button>
+
+    {colorDropdownOpen ? (
+      <div className="mt-2 animate-[fadeUpProduct_300ms_ease_both] border border-[#ddd5c9] bg-white p-4 shadow-[0_18px_45px_rgba(23,17,13,0.14)]">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {product.colors.map((color) => (
+            <button
+              key={`dropdown-${color.id || color.name}`}
+              type="button"
+              onClick={() => {
+                setSelectedColor(color.name);
+                setColorDropdownOpen(false);
+              }}
+              disabled={color.available === false}
+              className="flex items-center gap-2 px-2 py-2 text-left text-[13px] transition hover:bg-[#f7f1e8] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span
+                className="h-5 w-5 rounded-full border border-[#cfc6ba]"
+                style={{
+                  backgroundColor: color.hex || normalizeHex(color.name),
+                }}
+              />
+
+              {color.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    ) : null}
+
+    <div className="mt-4 grid grid-cols-8 gap-x-[12px] gap-y-[14px] sm:grid-cols-10">
+      {product.colors.map((color, index) => {
+        const active =
+          normalizeCompare(color.name) === normalizeCompare(selectedColor);
+
+        return (
+          <button
+            key={`${color.id || color.name}-${index}`}
+            type="button"
+            onClick={() => setSelectedColor(color.name)}
+            disabled={color.available === false}
+            className={[
+              "group relative flex h-[34px] w-[34px] items-center justify-center rounded-full border transition-all duration-300 hover:scale-110",
+              active
+                ? "border-[#15100c] ring-2 ring-[#15100c] ring-offset-2"
+                : "border-[#dfd7cc]",
+              color.available === false ? "cursor-not-allowed opacity-50" : "",
+            ].join(" ")}
+            title={color.name}
+          >
+            <span
+              className="block h-full w-full rounded-full"
+              style={{
+                backgroundColor: color.hex || normalizeHex(color.name),
+              }}
+            />
+          </button>
+        );
+      })}
+    </div>
+  </div>
+) : null}
 
                 {product.sizes.length ? (
                   <div>
                     <div className="mb-3 flex items-center justify-between">
-                      <p className="text-[11px] uppercase tracking-[0.32em] text-[#8b867f]">
-                        Size
-                      </p>
+                     <p className="text-[15px] font-bold uppercase tracking-[0.04em] text-[#15100c]">
+  SIZE: {selectedSize ? formatSizeLabel(selectedSize) : "Select"}
+</p>
 
                       {sizeGuideTabs.length ? (
                         <button
@@ -2794,17 +3011,48 @@ onMouseMove={(event) => {
                       ) : null}
                     </div>
 
-                    <select
-                      value={selectedSize}
-                      onChange={(event) => setSelectedSize(event.target.value)}
-                      className="h-[52px] w-full border border-[#15100c] bg-white px-4 text-[14px] font-semibold text-[#15100c] outline-none transition focus:shadow-[0_10px_24px_rgba(23,17,13,0.08)]"
-                    >
-                      {product.sizes.map((size) => (
-                        <option key={size.label} value={size.label}>
-                          {size.label}
-                        </option>
-                      ))}
-                    </select>
+                   <div className="flex flex-wrap gap-3">
+{product.sizes.map((size) => {
+  const active =
+    normalizeCompare(selectedSize) === normalizeCompare(size.label);
+
+  const disabled = size.available === false;
+
+  return (
+    <button
+      key={size.label}
+      type="button"
+      onClick={() => {
+        if (disabled) return;
+        setSelectedSize(size.label);
+      }}
+      disabled={disabled}
+      aria-disabled={disabled}
+      title={
+        disabled
+          ? `${formatSizeLabel(size.label)} unavailable`
+          : `Select ${formatSizeLabel(size.label)}`
+      }
+      className={[
+        "relative inline-flex h-[48px] min-w-[64px] items-center justify-center rounded-[4px] border px-5 text-[15px] font-semibold tracking-[0.04em] transition-all duration-200",
+        active && !disabled
+          ? "border-[#15100c] bg-[#15100c] text-white"
+          : "border-[#ddd5c9] bg-white text-[#5f5a54] hover:border-[#15100c] hover:text-[#15100c]",
+        disabled
+          ? "cursor-not-allowed border-[#e5ded5] bg-[#faf8f5] text-[#b8b1aa] opacity-60 hover:border-[#e5ded5] hover:text-[#b8b1aa]"
+          : "",
+        normalizeCompare(size.label) === "custom" ? "min-w-[126px]" : "",
+      ].join(" ")}
+    >
+      {formatSizeLabel(size.label)}
+
+      {disabled ? (
+        <span className="pointer-events-none absolute left-1/2 top-1/2 h-[1px] w-[58%] -translate-x-1/2 -translate-y-1/2 rotate-[-18deg] bg-[#b8b1aa]" />
+      ) : null}
+    </button>
+  );
+})}
+</div>
                   </div>
                 ) : null}
 
