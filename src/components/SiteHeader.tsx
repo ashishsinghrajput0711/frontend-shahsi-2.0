@@ -36,6 +36,31 @@ import {
   type SearchProduct,
 } from "@/lib/api/search.api";
 
+function isCollectionNode(node: CatalogCategoryTreeNode) {
+  const record = node as CatalogCategoryTreeNode & {
+    nodeType?: string | null;
+    type?: string | null;
+  };
+
+  return (
+    String(record.nodeType || "").toLowerCase() === "collection" ||
+    String(record.type || "").toLowerCase() === "collection"
+  );
+}
+
+function removeCollectionNodes(
+  nodes: CatalogCategoryTreeNode[],
+): CatalogCategoryTreeNode[] {
+  return nodes
+    .filter((node) => !isCollectionNode(node))
+    .map((node) => ({
+      ...node,
+      children: Array.isArray(node.children)
+        ? removeCollectionNodes(node.children)
+        : [],
+    }));
+}
+
 
 type SiteHeaderBranding = {
   brandName: string;
@@ -454,17 +479,17 @@ async function loadSiteHeaderBranding() {
     }
   }
 
-  async function loadCategoryTree() {
-    try {
-     const response = await getCatalogCategoryTree();
-const tree = unwrapCatalogCategoryTree(response);
+async function loadCategoryTree() {
+  try {
+    const response = await getCatalogCategoryTree();
+    const tree = removeCollectionNodes(unwrapCatalogCategoryTree(response));
 
-setCategoryTree(tree);
-    } catch (error) {
-      console.error("Header category tree load failed:", error);
-      setCategoryTree([]);
-    }
+    setCategoryTree(tree);
+  } catch (error) {
+    console.error("Header category tree load failed:", error);
+    setCategoryTree([]);
   }
+}
 
 
 
@@ -584,6 +609,32 @@ setSearchResults(results);
       showTopStripRef.current = nextValue;
       setShowTopStrip(nextValue);
     }
+
+
+    function isCollectionNode(node: CatalogCategoryTreeNode) {
+  const record = node as CatalogCategoryTreeNode & {
+    nodeType?: string | null;
+    type?: string | null;
+  };
+
+  return (
+    String(record.nodeType || "").toLowerCase() === "collection" ||
+    String(record.type || "").toLowerCase() === "collection"
+  );
+}
+
+function removeCollectionNodes(
+  nodes: CatalogCategoryTreeNode[],
+): CatalogCategoryTreeNode[] {
+  return nodes
+    .filter((node) => !isCollectionNode(node))
+    .map((node) => ({
+      ...node,
+      children: Array.isArray(node.children)
+        ? removeCollectionNodes(node.children)
+        : [],
+    }));
+}
 
     function handleScroll() {
       if (ticking) return;

@@ -1716,6 +1716,10 @@ function getSeeMoreFromHref(
   categoryTree: CatalogCategoryTreeNode[],
   currentCategoryPath: string,
 ) {
+  const collectionHref = buildCollectionHrefFromValue(label);
+
+  if (collectionHref) return collectionHref;
+
   const categoryHref = buildCategoryHrefFromCollectionValue(categoryTree, label);
 
   if (categoryHref) return categoryHref;
@@ -1723,15 +1727,38 @@ function getSeeMoreFromHref(
   return currentCategoryPath ? `/${currentCategoryPath}` : "/collection";
 }
 
+function buildCollectionHrefFromValue(value: string) {
+  const cleanValue = String(value || "").trim();
+
+  if (!cleanValue) return "";
+
+  if (cleanValue.startsWith("/collections/")) {
+    return cleanValue;
+  }
+
+  if (cleanValue.startsWith("collections/")) {
+    return `/${cleanValue}`;
+  }
+
+  const slug = cleanValue
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug ? `/collections/${slug}` : "";
+}
+
 function buildCollectionBreadcrumbItem(
   label: string,
   categoryTree: CatalogCategoryTreeNode[],
 ) {
-  const href = buildCategoryHrefFromCollectionValue(categoryTree, label);
+  const collectionHref = buildCollectionHrefFromValue(label);
+  const categoryHref = buildCategoryHrefFromCollectionValue(categoryTree, label);
 
   return {
     label,
-    href,
+    href: collectionHref || categoryHref,
     slug: label,
   };
 }
@@ -1892,12 +1919,16 @@ const [shareCopied, setShareCopied] = useState(false);
         setLoading(true);
         setError("");
 
-       if (!cleanCategoryPath) {
-  throw new Error("Category path missing in product URL.");
+ if (!cleanProductId) {
+  throw new Error("Product slug/id missing in product URL.");
 }
 
-if (!cleanProductId) {
-  throw new Error("Product slug/id missing in product URL.");
+if (!cleanCategoryPath) {
+  console.warn("Category path missing in product URL. Product slug/id se load kar rahe hain.", {
+    categoryPath,
+    productId,
+    cleanProductId,
+  });
 }
 
 const response = await fetchCatalogProductBySlugOrId(cleanProductId);
@@ -2371,7 +2402,7 @@ async function handleCopyProductLink() {
             </div>
 
           <a
-  href={cleanCategoryPath ? `/${cleanCategoryPath}` : "/products"}
+href={cleanCategoryPath ? `/${cleanCategoryPath}` : "/"}
               className="mt-6 inline-flex h-[44px] items-center justify-center border border-[#15100c] px-5 text-[10px] uppercase tracking-[0.24em] text-[#15100c]"
             >
               Back to Category

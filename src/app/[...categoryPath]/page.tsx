@@ -14,6 +14,28 @@ import {
   getCategoryTreeArray,
 } from "@/lib/category-tree.utils";
 
+function isCollectionNode(node: CatalogCategoryTreeNode) {
+  const record = node as CatalogCategoryTreeNode & {
+    nodeType?: string | null;
+    type?: string | null;
+  };
+
+  return record.nodeType === "collection" || record.type === "collection";
+}
+
+function removeCollectionNodes(
+  nodes: CatalogCategoryTreeNode[],
+): CatalogCategoryTreeNode[] {
+  return nodes
+    .filter((node) => !isCollectionNode(node))
+    .map((node) => ({
+      ...node,
+      children: Array.isArray(node.children)
+        ? removeCollectionNodes(node.children)
+        : [],
+    }));
+}
+
 function DynamicCatalogPathContent() {
   const params = useParams();
 
@@ -44,7 +66,7 @@ function DynamicCatalogPathContent() {
         setTreeError("");
 
         const response = await getCatalogCategoryTree();
-        const tree = getCategoryTreeArray(response);
+        const tree = removeCollectionNodes(getCategoryTreeArray(response));
 
         if (!mounted) return;
 

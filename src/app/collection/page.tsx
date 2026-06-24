@@ -21,6 +21,10 @@ type ProductSelection = {
   height: string;
 };
 
+type CollectionPageContentProps = {
+  collectionSlug?: string;
+};
+
 function getProductId(product: CatalogProduct) {
   return String(product.id || product.productId || "");
 }
@@ -29,6 +33,12 @@ function normalizeCompare(value?: string | number | null) {
   return String(value || "")
     .trim()
     .toLowerCase();
+}
+
+function normalizeTitle(value: string) {
+  return String(value || "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function getImageFromCatalog(product: CatalogProduct) {
@@ -70,12 +80,6 @@ function getPriceFromCatalog(product: CatalogProduct) {
   if (!Number.isNaN(numeric)) return `$${numeric}`;
 
   return String(price);
-}
-
-function normalizeTitle(value: string) {
-  return String(value || "")
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function getProductVariants(product: CatalogProduct): CatalogVariant[] {
@@ -203,10 +207,126 @@ function findMatchingVariant(
   return variants.find(isVariantAvailable) || null;
 }
 
-function getProductDetailHref(product: CatalogProduct) {
+function getProductDetailHref(
+  product: CatalogProduct,
+  collectionSlug?: string,
+) {
   const slugOrId = String(product.slug || product.id || product.productId || "").trim();
 
-  return slugOrId ? `/collection/${encodeURIComponent(slugOrId)}` : "#";
+  if (!slugOrId) return "#";
+
+  if (collectionSlug) {
+    return `/collections/${encodeURIComponent(collectionSlug)}/${encodeURIComponent(
+      slugOrId,
+    )}`;
+  }
+
+  return `/collection?product=${encodeURIComponent(slugOrId)}`;
+}
+
+async function readProxyJson(endpoint: string) {
+  const response = await fetch(`/api/proxy${endpoint}`, {
+    method: "GET",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  const text = await response.text();
+  const data = text.trim() ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    const message =
+      data?.message ||
+      data?.error ||
+      data?.data?.error ||
+      `API failed: ${endpoint} returned ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+function extractProductsFromCollectionResponse(data: any) {
+  const payload = data?.data || data || {};
+
+  const products =
+    Array.isArray(payload.products)
+      ? payload.products
+      : Array.isArray(payload.items)
+        ? payload.items
+        : Array.isArray(payload.data)
+          ? payload.data
+          : Array.isArray(data?.products)
+            ? data.products
+            : Array.isArray(data?.items)
+              ? data.items
+              : [];
+
+  const meta = payload.meta || payload.pagination || data?.meta || data?.pagination || {};
+
+  const total = Number(
+    meta.total ||
+      payload.total ||
+      data?.total ||
+      products.length ||
+      0,
+  );
+
+  const totalPages =
+    Number(meta.totalPages || payload.totalPages || data?.totalPages || 0) ||
+    Math.max(1, Math.ceil(total / PRODUCTS_PER_PAGE));
+
+  const collection =
+    payload.collection ||
+    payload.category ||
+    data?.collection ||
+    data?.category ||
+    null;
+
+  return {
+    products,
+    total,
+    totalPages,
+    collection,
+  };
+}
+
+async function getCollectionProductsBySlug({
+  slug,
+  page,
+}: {
+  slug: string;
+  page: number;
+}) {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("limit", String(PRODUCTS_PER_PAGE));
+
+  const encodedSlug = encodeURIComponent(slug);
+
+  const endpoints = [
+    `/catalog/collections/${encodedSlug}/products?${params.toString()}`,
+    `/catalog/collections/${encodedSlug}?${params.toString()}`,
+    `/catalog/categories/${encodedSlug}/products?${params.toString()}`,
+  ];
+
+  let lastError: unknown = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const data = await readProxyJson(endpoint);
+      return extractProductsFromCollectionResponse(data);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Collection products load failed.");
 }
 
 async function addProductToCart(
@@ -226,15 +346,17 @@ async function addProductToCart(
 
   const variantId = String(variant.variantId || variant.id || "");
 
-await addToCart({
-  productId,
-  variantId,
-  quantity: 1,
-  deliveryOption: "STANDARD",
-} as any);
+  await addToCart({
+    productId,
+    variantId,
+    quantity: 1,
+    deliveryOption: "STANDARD",
+  } as any);
 }
 
-function CollectionPageContent() {
+export function CollectionPageContent({
+  collectionSlug = "",
+}: CollectionPageContentProps) {
   const searchParams = useSearchParams();
 
   const colorStory = searchParams.get("colorStory") || "";
@@ -245,6 +367,7 @@ function CollectionPageContent() {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [collectionTitle, setCollectionTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selections, setSelections] = useState<Record<string, ProductSelection>>(
@@ -254,10 +377,12 @@ function CollectionPageContent() {
   const [cartMessage, setCartMessage] = useState("");
 
   const heading = useMemo(() => {
+    if (collectionTitle) return collectionTitle;
+    if (collectionSlug) return normalizeTitle(collectionSlug);
     if (colorStory) return `${normalizeTitle(colorStory)} Collection`;
     if (color) return `${normalizeTitle(color)} Collection`;
     return "All Collections";
-  }, [colorStory, color]);
+  }, [collectionTitle, collectionSlug, colorStory, color]);
 
   useEffect(() => {
     let mounted = true;
@@ -268,36 +393,58 @@ function CollectionPageContent() {
         setError("");
         setCartMessage("");
 
-        const commonQuery = {
-          page: currentPage,
-          limit: PRODUCTS_PER_PAGE,
-          sort: "featured",
-        };
+        let rawProducts: CatalogProduct[] = [];
+        let responseTotal = 0;
+        let responseTotalPages = 1;
+        let nextCollectionTitle = "";
 
-        const response =
-          colorStory || color
-            ? await getCatalogFilteredProducts({
-                ...commonQuery,
-                ...(colorStory ? { colorStory } : {}),
-                ...(color ? { color } : {}),
-              })
-            : await getCatalogProducts(commonQuery);
+        if (collectionSlug) {
+          const result = await getCollectionProductsBySlug({
+            slug: collectionSlug,
+            page: currentPage,
+          });
 
-        const rawProducts = unwrapCatalogProducts(response);
+          rawProducts = result.products;
+          responseTotal = result.total;
+          responseTotalPages = result.totalPages;
+
+          nextCollectionTitle =
+            result.collection?.name ||
+            result.collection?.title ||
+            normalizeTitle(collectionSlug);
+        } else {
+          const commonQuery = {
+            page: currentPage,
+            limit: PRODUCTS_PER_PAGE,
+            sort: "featured",
+          };
+
+          const response =
+            colorStory || color
+              ? await getCatalogFilteredProducts({
+                  ...commonQuery,
+                  ...(colorStory ? { colorStory } : {}),
+                  ...(color ? { color } : {}),
+                })
+              : await getCatalogProducts(commonQuery);
+
+          rawProducts = unwrapCatalogProducts(response);
+
+          const data = response?.data || {};
+          const pagination = data?.pagination || {};
+
+          responseTotal = Number(
+            data?.total ?? pagination?.total ?? rawProducts.length,
+          );
+
+          responseTotalPages = Number(
+            data?.totalPages ??
+              pagination?.totalPages ??
+              Math.max(1, Math.ceil(responseTotal / PRODUCTS_PER_PAGE)),
+          );
+        }
+
         const visibleProducts = filterPublicVisibleProducts(rawProducts);
-
-        const data = response?.data || {};
-        const pagination = data?.pagination || {};
-
-        const responseTotal = Number(
-          data?.total ?? pagination?.total ?? visibleProducts.length,
-        );
-
-        const responseTotalPages = Number(
-          data?.totalPages ??
-            pagination?.totalPages ??
-            Math.max(1, Math.ceil(responseTotal / PRODUCTS_PER_PAGE)),
-        );
 
         const initialSelections: Record<string, ProductSelection> = {};
 
@@ -315,6 +462,7 @@ function CollectionPageContent() {
         setTotal(responseTotal);
         setTotalPages(responseTotalPages);
         setSelections(initialSelections);
+        setCollectionTitle(nextCollectionTitle);
       } catch (error: any) {
         console.error("Collection load failed:", error);
 
@@ -323,6 +471,7 @@ function CollectionPageContent() {
         setProducts([]);
         setTotal(0);
         setTotalPages(1);
+        setCollectionTitle("");
         setError(error?.message || "Collection load failed");
       } finally {
         if (mounted) {
@@ -336,7 +485,7 @@ function CollectionPageContent() {
     return () => {
       mounted = false;
     };
-  }, [colorStory, color, currentPage]);
+  }, [collectionSlug, colorStory, color, currentPage]);
 
   function updateSelection(
     product: CatalogProduct,
@@ -385,7 +534,7 @@ function CollectionPageContent() {
       <section className="border-b border-[#ddd5c9] px-4 py-12 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-[1400px]">
           <p className="text-[9px] uppercase tracking-[0.42em] text-[#b98262]">
-            Global Collection
+            {collectionSlug ? "Curated Collection" : "Global Collection"}
           </p>
 
           <div className="mt-3 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -397,7 +546,7 @@ function CollectionPageContent() {
               <p className="mt-3 text-[13px] text-[#7a746e]">
                 {loading
                   ? "Loading products..."
-                  : `${total} products found across the full catalog`}
+                  : `${total} products found`}
               </p>
             </div>
 
@@ -405,7 +554,7 @@ function CollectionPageContent() {
               href="/collection"
               className="w-fit border border-[#15100c] px-5 py-3 text-[10px] uppercase tracking-[0.28em] transition hover:bg-[#15100c] hover:text-white"
             >
-              Clear Filter
+              All Collections
             </a>
           </div>
         </div>
@@ -416,7 +565,7 @@ function CollectionPageContent() {
           {loading ? (
             <div className="flex items-center gap-3 rounded-xl border border-[#ddd5c9] bg-white/70 px-5 py-4 text-sm text-[#6d6760]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading global catalog products...
+              Loading collection products...
             </div>
           ) : null}
 
@@ -435,7 +584,7 @@ function CollectionPageContent() {
 
           {!loading && !error && !products.length ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-sm text-amber-800">
-              Is filter ke liye global catalog me koi product nahi mila.
+              Is collection me koi product nahi mila.
             </div>
           ) : null}
 
@@ -448,7 +597,7 @@ function CollectionPageContent() {
               const sizes = getProductSizes(product);
               const heights = getProductHeights(product);
               const selection = selections[productId] || getDefaultSelection(product);
-              const detailHref = getProductDetailHref(product);
+              const detailHref = getProductDetailHref(product, collectionSlug);
               const matchingVariant = findMatchingVariant(product, selection);
               const canAdd = Boolean(matchingVariant && productId);
               const isAdding = addingId === productId;
@@ -589,7 +738,11 @@ function CollectionPageContent() {
               {Array.from({ length: totalPages }).map((_, index) => {
                 const page = index + 1;
 
-                const href = `/collection?${new URLSearchParams({
+                const basePath = collectionSlug
+                  ? `/collections/${encodeURIComponent(collectionSlug)}`
+                  : "/collection";
+
+                const href = `${basePath}?${new URLSearchParams({
                   ...(colorStory ? { colorStory } : {}),
                   ...(color ? { color } : {}),
                   page: String(page),
@@ -617,7 +770,6 @@ function CollectionPageContent() {
     </main>
   );
 }
-
 
 export default function CollectionPage() {
   return (
