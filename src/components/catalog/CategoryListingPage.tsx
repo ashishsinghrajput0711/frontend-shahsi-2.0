@@ -915,6 +915,35 @@ function getCatalogPaginationMeta(response: any, fallbackCount: number) {
 }
 
 
+function hasRichHtml(value?: string | null) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(value || ""));
+}
+
+function stripHtml(value?: string | null) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCategoryDescriptionHtml(category?: CatalogCategoryTreeNode | null) {
+  const description = String((category as any)?.description || "").trim();
+
+  if (!description) return "";
+
+  if (hasRichHtml(description)) return description;
+
+  return `<p>${description}</p>`;
+}
+
+function getCategorySubHeading(category?: CatalogCategoryTreeNode | null) {
+  return String(
+    (category as any)?.metafields?.subHeading ||
+      (category as any)?.subHeading ||
+      "",
+  ).trim();
+}
+
 
 export function CategoryListingPage({
   categoryPath,
@@ -1485,6 +1514,8 @@ mapping/public status check karo.
               </div>
             ) : null}
 
+            <CategoryRichIntro selectedCategory={selectedCategory} />
+
             <div
               id="grid"
               className="grid grid-cols-1 gap-x-[18px] gap-y-[34px] sm:grid-cols-2 xl:grid-cols-4"
@@ -1515,12 +1546,13 @@ mapping/public status check karo.
               />
             ) : null}
 
-            <BridesmaidCopy
-              faqSection={faqSection}
-              faqs={categoryFaqs}
-              faqLoading={faqLoading}
-              faqError={faqError}
-            />
+      <BridesmaidCopy
+  selectedCategory={selectedCategory}
+  faqSection={faqSection}
+  faqs={categoryFaqs}
+  faqLoading={faqLoading}
+  faqError={faqError}
+/>
           </div>
         </div>
       </section>
@@ -3182,20 +3214,87 @@ function PaginationControls({
   );
 }
 
+function CategoryRichIntro({
+  selectedCategory,
+}: {
+  selectedCategory: CatalogCategoryTreeNode | null;
+}) {
+  const descriptionHtml = getCategoryDescriptionHtml(selectedCategory);
+  const subHeading = getCategorySubHeading(selectedCategory);
+  const imageUrl = String((selectedCategory as any)?.imageUrl || "").trim();
+  const imageAltText = String(
+    (selectedCategory as any)?.imageAltText ||
+      selectedCategory?.name ||
+      "Category image",
+  ).trim();
+
+  if (!descriptionHtml && !subHeading && !imageUrl) return null;
+
+  return (
+    <section className="mb-[34px] overflow-hidden border border-[#ddd5c9] bg-white/70 shadow-[0_18px_45px_rgba(23,17,13,0.05)]">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 px-5 py-6 sm:px-7 sm:py-8">
+          <p className="mb-3 text-[9px] uppercase tracking-[0.42em] text-[#b98262]">
+            Category Edit
+          </p>
+
+          <h2 className="font-serif text-[34px] italic leading-none tracking-[-0.045em] text-[#15100c] md:text-[42px]">
+            {selectedCategory?.name || "Category"}
+          </h2>
+
+          {subHeading ? (
+            <p className="mt-4 max-w-[760px] text-[14px] leading-7 text-[#6d6760]">
+              {subHeading}
+            </p>
+          ) : null}
+
+          {descriptionHtml ? (
+            <div
+              className="category-rich-content mt-6 max-w-[860px] text-[15px] leading-8 text-[#3f3831] [&_a]:text-[#b98262] [&_a]:underline [&_blockquote]:border-l-4 [&_blockquote]:border-[#d8cfc2] [&_blockquote]:pl-4 [&_h1]:mb-4 [&_h1]:font-serif [&_h1]:text-[38px] [&_h1]:italic [&_h1]:leading-tight [&_h2]:mb-4 [&_h2]:font-serif [&_h2]:text-[31px] [&_h2]:italic [&_h2]:leading-tight [&_h3]:mb-3 [&_h3]:font-serif [&_h3]:text-[25px] [&_h3]:italic [&_h3]:leading-tight [&_h4]:mb-3 [&_h4]:text-[20px] [&_h4]:font-semibold [&_h5]:mb-2 [&_h5]:text-[17px] [&_h5]:font-semibold [&_h6]:mb-2 [&_h6]:text-[15px] [&_h6]:font-semibold [&_img]:my-5 [&_img]:max-h-[420px] [&_img]:w-full [&_img]:object-cover [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-4 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#ddd5c9] [&_td]:p-2 [&_th]:border [&_th]:border-[#ddd5c9] [&_th]:bg-[#eee8df] [&_th]:p-2 [&_ul]:list-disc"
+              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+            />
+          ) : null}
+        </div>
+
+        {imageUrl ? (
+          <div className="hidden border-l border-[#ddd5c9] bg-[#eee8df] lg:block">
+            <img
+              src={imageUrl}
+              alt={imageAltText}
+              className="h-full min-h-[360px] w-full object-cover object-top"
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
 function BridesmaidCopy({
+  selectedCategory,
   faqSection,
   faqs,
   faqLoading,
   faqError,
 }: {
+  selectedCategory: CatalogCategoryTreeNode | null;
   faqSection: CatalogCategoryFaqSection | null;
   faqs: CatalogCategoryFaq[];
   faqLoading: boolean;
   faqError: string;
 }) {
-  const heading = faqSection?.heading?.trim();
+  const fallbackHeading = selectedCategory?.name
+    ? `${selectedCategory.name} FAQs`
+    : "FAQs";
+
+  const heading =
+    faqSection?.heading?.trim() ||
+    (faqs.length ? fallbackHeading : "");
 
   const description = faqSection?.description?.trim();
+
+  if (!faqLoading && !faqError && !faqs.length && !heading && !description) {
+    return null;
+  }
 
   return (
     <section>
@@ -3204,14 +3303,19 @@ function BridesmaidCopy({
           FAQ
         </p>
 
-        <h3 className="font-serif text-[34px] italic tracking-[-0.04em]">
-          {heading}
-        </h3>
+        {heading ? (
+          <h3 className="font-serif text-[34px] italic tracking-[-0.04em]">
+            {heading}
+          </h3>
+        ) : null}
 
         {description ? (
-          <p className="mt-3 max-w-[760px] text-[13px] leading-6 text-[#6d6760]">
-            {description}
-          </p>
+          <div
+            className="mt-3 max-w-[760px] text-[13px] leading-6 text-[#6d6760] [&_a]:text-[#b98262] [&_a]:underline [&_p]:mb-3"
+            dangerouslySetInnerHTML={{
+              __html: hasRichHtml(description) ? description : `<p>${description}</p>`,
+            }}
+          />
         ) : null}
 
         {faqLoading ? (
@@ -3236,12 +3340,6 @@ function BridesmaidCopy({
               />
             ))}
           </div>
-        ) : null}
-
-        {!faqLoading && !faqError && !faqs.length ? (
-          <p className="mt-5 text-[12px] text-[#8b867f]">
-            No FAQs added from admin yet.
-          </p>
         ) : null}
       </div>
     </section>
@@ -3281,9 +3379,12 @@ function FaqAccordionItem({
         ].join(" ")}
       >
         <div className="overflow-hidden">
-          <div className="pb-[22px] pr-8 text-[16px] leading-7 text-[#6d6760] md:text-[17px]">
-            {answer}
-          </div>
+         <div
+  className="pb-[22px] pr-8 text-[16px] leading-7 text-[#6d6760] md:text-[17px] [&_a]:text-[#b98262] [&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_ul]:list-disc"
+  dangerouslySetInnerHTML={{
+    __html: hasRichHtml(answer) ? answer : `<p>${answer}</p>`,
+  }}
+/>
         </div>
       </div>
     </div>

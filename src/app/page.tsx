@@ -269,7 +269,7 @@ function Hero() {
 
           <div className="mt-5 grid max-w-[420px] gap-3 sm:grid-cols-2">
               <a
-                href="/collection"
+              href="/products"
                 className={`inline-flex min-h-[54px] items-center justify-center rounded-full bg-[#15100c] px-5 py-4 text-center text-[10px] font-semibold uppercase tracking-[0.22em] text-white sm:text-[11px] ${actionButtonClass}`}
               >
                 Discover
@@ -348,7 +348,7 @@ function OccasionPanel() {
 
           <div className="mx-auto mt-8 grid max-w-[580px] grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-5 md:gap-6">
             {items.map(([title, Icon]) => (
-              <a key={title} href="/collection" className="group">
+              <a key={title} href="/products" className="group">
                 <span className="mx-auto flex h-[62px] w-[62px] items-center justify-center rounded-full bg-[#fff8ec] text-[#17110d] shadow-lg transition duration-300 group-hover:-translate-y-1 group-hover:scale-105 sm:h-[68px] sm:w-[68px]">
                   <Icon className="h-6 w-6 stroke-[1.7] sm:h-7 sm:w-7" />
                 </span>
@@ -361,7 +361,7 @@ function OccasionPanel() {
           </div>
 
           <a
-            href="/collection"
+           href="/products"
             className={`mt-8 inline-flex min-h-[44px] items-center justify-center rounded-full bg-[#d8a17e] px-7 text-[9px] font-semibold uppercase tracking-[0.28em] text-[#15100c] sm:px-10 sm:tracking-[0.34em] ${actionButtonClass}`}
           >
             Browse all styles
@@ -375,13 +375,13 @@ function OccasionPanel() {
 
 function FourDoors() {
   const items = [
-    {
-      title: "Shop",
-      tag: "Ready, in season",
-      copy: "The current collection — finished pieces, in stock, ready to ship.",
-      image: img.garden,
-      href: "/collection",
-    },
+   {
+  title: "Shop",
+  tag: "Ready, in season",
+  copy: "Ready-to-ship pieces, active catalog products, and latest category edits.",
+  image: img.garden,
+  href: "/products",
+},
     {
       title: "Made to Order",
       tag: "Cut just for you",
@@ -420,7 +420,7 @@ function FourDoors() {
           </div>
 
           <p className="text-[13px] font-light leading-6 text-[#6d6760]">
-            Shop the collection, have it made, browse by colour, or bring the
+          Shop ready products, have it made, browse by colour, or bring the
             whole bridal party into one private room.
           </p>
         </div>
@@ -568,7 +568,7 @@ function SeasonPalette() {
     filterValue?: string;
   }) {
     if (family.name === "All") {
-      router.push("/collection");
+   router.push("/products");
       return;
     }
 
@@ -576,7 +576,7 @@ function SeasonPalette() {
     // Example: Neutrals => /collection?colorStory=neutrals
     const value = normalizeFilterValue(family.name);
 
-    router.push(`/collection?colorStory=${encodeURIComponent(value)}`);
+  router.push(`/products?colorStory=${encodeURIComponent(value)}`);
   }
 
   function openGlobalShade(shade: {
@@ -588,7 +588,7 @@ function SeasonPalette() {
     // Example: Ivory => /collection?color=ivory
     const value = shade.filterValue || normalizeFilterValue(shade.name);
 
-    router.push(`/collection?color=${encodeURIComponent(value)}`);
+    router.push(`/products?color=${encodeURIComponent(value)}`);
   }
 
   function applyPalette(
@@ -848,7 +848,7 @@ function ProductCarousel({
           </div>
 
           <a
-            href="/collection"
+           href="/products"
             className="w-fit text-[10px] uppercase tracking-[0.3em] text-[#b98262]"
           >
             Shop all →
@@ -1068,7 +1068,7 @@ function NewArrivals() {
           </div>
 
           <a
-            href="/collection"
+       href="/products"
             className="pb-[18px] text-[10px] uppercase tracking-[0.3em] text-[#b98262]"
           >
             Shop all →
@@ -1091,38 +1091,38 @@ function NewArrivals() {
 }
 
 function MomentFinder() {
-  const edits = [
-    {
-      title: "Ready to Ship",
-      copy: "For fast timelines",
-      image: img.blue,
-      href: "/collection",
-    },
-    {
-      title: "Under $100",
-      copy: "Budget-friendly bridal",
-      image: img.white,
-      href: "/collection",
-    },
-    {
-      title: "Best Sellers",
-      copy: "Group-approved favorites",
-      image: img.hero,
-      href: "/collection",
-    },
-    {
-      title: "Plus Size",
-      copy: "Fit confidence included",
-      image: img.black,
-      href: "/collection",
-    },
-    {
-      title: "Maternity",
-      copy: "Tailored for every trimester",
-      image: img.blue,
-      href: "/collection",
-    },
-  ];
+ const edits = [
+  {
+    title: "Ready to Ship",
+    copy: "For fast timelines",
+    image: img.blue,
+    href: "/products?availability=ready-to-ship",
+  },
+  {
+    title: "Under $100",
+    copy: "Budget-friendly bridal",
+    image: img.white,
+    href: "/products?maxPrice=100",
+  },
+  {
+    title: "Best Sellers",
+    copy: "Group-approved favorites",
+    image: img.hero,
+    href: "/products?sort=best-selling",
+  },
+  {
+    title: "Plus Size",
+    copy: "Fit confidence included",
+    image: img.black,
+    href: "/products?size=plus",
+  },
+  {
+    title: "Maternity",
+    copy: "Tailored for every trimester",
+    image: img.blue,
+    href: "/products?occasion=maternity",
+  },
+];
 
   return (
     <section className="overflow-x-hidden bg-[#fbf8f1] pt-[42px]">
@@ -1138,7 +1138,7 @@ function MomentFinder() {
         </div>
 
         <a
-          href="/collection"
+       href="/products"
           className="hidden border-b border-[#15100c] pb-[5px] text-[12px] uppercase tracking-[0.34em] text-[#15100c] md:block"
         >
           View all edits
@@ -1487,7 +1487,7 @@ function FormalCollections() {
         </h2>
 
         <div className="grid items-start gap-[26px] lg:grid-cols-[minmax(0,540px)_1fr]">
-          <a href="/collection" className={`group rounded-[32px] bg-white p-3 shadow-sm ${cardHoverClass}`}>
+          <a href="/products" className={`group rounded-[32px] bg-white p-3 shadow-sm ${cardHoverClass}`}>
             <div className="h-[360px] overflow-hidden rounded-[26px] bg-[#ded5c8] sm:h-[470px] lg:h-[555px]">
               <img
                 src={img.formal}
@@ -1503,7 +1503,7 @@ function FormalCollections() {
 
           <div className="grid grid-cols-2 gap-x-[14px] gap-y-[24px] sm:grid-cols-3 sm:gap-x-[18px] sm:gap-y-[28px]">
             {collections.map((item) => (
-              <a key={item.title} href="/collection" className={`group rounded-[24px] bg-white p-2 shadow-sm ${cardHoverClass}`}>
+              <a key={item.title} href="/products" className={`group rounded-[24px] bg-white p-2 shadow-sm ${cardHoverClass}`}>
                 <div className="h-[145px] overflow-hidden rounded-[18px] bg-[#ded5c8] sm:h-[155px]">
                   <img
                     src={item.image}
@@ -1610,7 +1610,7 @@ function SwatchSection() {
             </h3>
 
             <a
-              href="/collection"
+          href="/products"
               className="mt-[24px] inline-block border-b border-white pb-[4px] font-serif text-[20px] text-white"
             >
               Shop All
@@ -1660,7 +1660,7 @@ function EditorialEdits() {
           {edits.map((edit) => (
             <a
               key={edit.title}
-              href="/collection"
+          href="/products"
               className={`group relative h-[380px] overflow-hidden rounded-[36px] bg-[#ded5c8] sm:h-[440px] ${cardHoverClass}`}
             >
               <img
@@ -1693,23 +1693,23 @@ function EditorialEdits() {
 }
 
 function JustBeforeIDo() {
-  const looks = [
-    {
-      title: "getting ready looks",
-      image: img.gettingReady,
-      href: "/collection",
-    },
-    {
-      title: "something blue for bridesmaids",
-      image: img.blueBridesmaids,
-      href: "/collection",
-    },
-    {
-      title: "bridal slip dresses",
-      image: img.bridalSlip,
-      href: "/collection",
-    },
-  ];
+ const looks = [
+  {
+    title: "getting ready looks",
+    image: img.gettingReady,
+    href: "/products?occasion=getting-ready",
+  },
+  {
+    title: "something blue for bridesmaids",
+    image: img.blueBridesmaids,
+    href: "/bridesmaid",
+  },
+  {
+    title: "bridal slip dresses",
+    image: img.bridalSlip,
+    href: "/products?search=bridal-slip-dresses",
+  },
+];
 
   return (
     <section className="overflow-x-hidden bg-[#fbf8f1] px-4 py-[60px] sm:px-6">
