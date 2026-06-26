@@ -11,7 +11,7 @@ const RAW_API_BASE_URL =
 const RAW_SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
   process.env.NEXT_PUBLIC_FRONTEND_URL ||
-  "https://frontend-shashiasd.vercel.app";
+  "https://frontend-shahsi-2-0.vercel.app";
 
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/$/, "");
 const SITE_URL = RAW_SITE_URL.replace(/\/$/, "");
@@ -69,11 +69,36 @@ function absoluteUrl(url?: string | null) {
   return `${SITE_URL}${cleanUrl.startsWith("/") ? "" : "/"}${cleanUrl}`;
 }
 
+function isImageLike(item: any) {
+  const type = String(
+    item?.type || item?.mediaType || item?.resourceType || item?.mimeType || "",
+  ).toLowerCase();
+
+  if (!type) return true;
+
+  return type.includes("image") && !type.includes("video");
+}
+
 function getImageFromArray(items: any[]) {
-  const primary =
-    items.find((item) => item?.isPrimary) ||
-    items.find((item) => item?.primary) ||
-    items[0];
+  const imageItems = items.filter((item) => {
+    if (typeof item === "string") return true;
+    return isImageLike(item);
+  });
+
+  const sortedItems = [...imageItems].sort((a, b) => {
+    const aPrimary = Boolean(a?.isPrimary || a?.primary);
+    const bPrimary = Boolean(b?.isPrimary || b?.primary);
+
+    if (aPrimary && !bPrimary) return -1;
+    if (!aPrimary && bPrimary) return 1;
+
+    const aPosition = Number(a?.position ?? a?.sortOrder ?? 999);
+    const bPosition = Number(b?.position ?? b?.sortOrder ?? 999);
+
+    return aPosition - bPosition;
+  });
+
+  const primary = sortedItems[0];
 
   if (!primary) return "";
 
@@ -95,25 +120,42 @@ function getProductImage(product: any) {
   const images = Array.isArray(product?.images) ? product.images : [];
   const media = Array.isArray(product?.media) ? product.media : [];
 
-  const imageMedia = media.filter((item: any) => {
-    const type = String(
-      item?.type || item?.mediaType || item?.viewType || item?.mimeType || "",
-    ).toLowerCase();
-
-    return type.includes("image") || !type.includes("video");
-  });
-
   return absoluteUrl(
-    product?.ogImage ||
-      product?.pinterestImage ||
+    product?.socialPreviewImage ||
+      product?.socialImage ||
+      getImageFromArray(images) ||
+      getImageFromArray(media) ||
       product?.primaryImage ||
       product?.imageUrl ||
       product?.image ||
       product?.thumbnail ||
       product?.thumbnailUrl ||
-      getImageFromArray(images) ||
-      getImageFromArray(imageMedia) ||
+      product?.ogImage ||
+      product?.pinterestImage ||
       "",
+  );
+}
+
+function buildSocialPreviewImage(url?: string | null) {
+  const imageUrl = absoluteUrl(url);
+
+  if (!imageUrl) return "";
+
+  if (!imageUrl.includes("/image/upload/")) {
+    return imageUrl;
+  }
+
+  if (
+    imageUrl.includes("w_1200") &&
+    imageUrl.includes("h_630") &&
+    imageUrl.includes("c_pad")
+  ) {
+    return imageUrl;
+  }
+
+  return imageUrl.replace(
+    "/image/upload/",
+    "/image/upload/w_1200,h_630,c_pad,b_white,q_auto,f_auto/",
   );
 }
 
@@ -159,7 +201,9 @@ export async function generateMetadata({
 
   const description = stripHtml(getProductDescription(product)).slice(0, 220);
 
-  const image = getProductImage(product);
+  const productImage = getProductImage(product);
+  const socialImage = buildSocialPreviewImage(productImage);
+
   const productSlug = String(product?.slug || slug).trim();
   const url = `${SITE_URL}/products/${encodeURIComponent(productSlug)}`;
 
@@ -174,16 +218,16 @@ export async function generateMetadata({
     alternates: {
       canonical: url,
     },
-  openGraph: {
+    openGraph: {
   title,
   description,
   url,
   siteName: "Shahsi",
   type: "website",
-  images: image
+  images: socialImage
     ? [
         {
-          url: image,
+          url: socialImage,
           width: 1200,
           height: 630,
           alt: title,
@@ -195,14 +239,13 @@ export async function generateMetadata({
       card: "summary_large_image",
       title,
       description,
-      images: image ? [image] : [],
+      images: socialImage ? [socialImage] : [],
     },
     other: {
-  "og:type": "product",
-  "product:price:amount": price ? String(price) : "",
-  "product:price:currency": currency,
-  "pinterest-rich-pin": "true",
-},
+      "product:price:amount": price ? String(price) : "",
+      "product:price:currency": currency,
+      "pinterest-rich-pin": "true",
+    },
   };
 }
 
