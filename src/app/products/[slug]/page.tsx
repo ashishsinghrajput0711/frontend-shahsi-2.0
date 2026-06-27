@@ -271,17 +271,29 @@ export async function generateMetadata({
   const { slug } = await params;
   const product = await getProduct(slug);
 
-  const title = String(
+ const seoTitle = String(
+  product?.seoTitle ||
+    product?.metaTitle ||
+    product?.title ||
+    product?.name ||
+    "Shahsi Product",
+).trim();
+
+const facebookTitle = String(
+  product?.name ||
+    product?.title ||
+    product?.ogTitle ||
+    product?.openGraph?.title ||
+    product?.metaTitle ||
     product?.seoTitle ||
-      product?.metaTitle ||
-      product?.ogTitle ||
-      product?.openGraph?.title ||
-      product?.pinterestTitle ||
-      product?.pinterestSeo?.title ||
-      product?.title ||
-      product?.name ||
-      "Shahsi Product",
-  ).trim();
+    "Shahsi Product",
+)
+  .replace(/\s+/g, " ")
+  .replace(/\s+for\s+Quiet Luxury.*$/i, "")
+  .replace(/\s+for\s+Luxury Resort.*$/i, "")
+  .replace(/\s*&\s*Elevated.*$/i, "")
+  .trim()
+  .slice(0, 72);
 
   const currency = String(
     product?.currency || product?.pricing?.currency || "USD",
@@ -293,7 +305,7 @@ export async function generateMetadata({
   });
 
   const productImage = getProductImage(product);
-  const socialImage = buildSocialPreviewImage(productImage);
+  const socialImage = productImage;
 
   const productSlug = String(product?.slug || slug).trim();
   const url = `${SITE_URL}/products/${encodeURIComponent(productSlug)}`;
@@ -301,20 +313,10 @@ export async function generateMetadata({
   const rawPrice = getRawProductPrice(product);
   const priceAmount = getNumericPrice(rawPrice);
  
-  const shortTitle = String(
-  product?.name ||
-    product?.title ||
-    title ||
-    "Shahsi Product",
-)
-  .replace(/\s+/g, " ")
-  .trim()
-  .slice(0, 75);
-
-const shareTitle = shortTitle;
+  const shareTitle = facebookTitle;
 
   return {
-    title: shareTitle,
+   title: seoTitle,
     description,
     alternates: {
       canonical: url,
@@ -325,16 +327,16 @@ const shareTitle = shortTitle;
       url,
       siteName: "Shahsi",
       type: "website",
-      images: socialImage
-        ? [
-            {
-              url: socialImage,
-              width: 1200,
-              height: 630,
-              alt: shareTitle,
-            },
-          ]
-        : [],
+   images: socialImage
+  ? [
+      {
+        url: socialImage,
+        width: 800,
+        height: 1200,
+        alt: shareTitle,
+      },
+    ]
+  : [],
     },
     twitter: {
       card: "summary_large_image",
