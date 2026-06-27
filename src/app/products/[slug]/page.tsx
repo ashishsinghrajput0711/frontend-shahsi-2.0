@@ -252,12 +252,17 @@ function getMetaDescriptionWithPrice({
   const baseDescription = stripHtml(getProductDescription(product));
   const priceText = getFormattedPrice(product, currency);
 
+  const cleanDescription = baseDescription
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 155);
+
   const parts = [
-    baseDescription,
+    cleanDescription,
     priceText ? `Price: ${priceText}.` : "",
   ].filter(Boolean);
 
-  return parts.join(" ").slice(0, 260);
+  return parts.join(" ");
 }
 
 export async function generateMetadata({
@@ -295,8 +300,18 @@ export async function generateMetadata({
 
   const rawPrice = getRawProductPrice(product);
   const priceAmount = getNumericPrice(rawPrice);
-  const priceText = getFormattedPrice(product, currency);
-  const shareTitle = priceText ? `${title} · ${priceText}` : title;
+ 
+  const shortTitle = String(
+  product?.name ||
+    product?.title ||
+    title ||
+    "Shahsi Product",
+)
+  .replace(/\s+/g, " ")
+  .trim()
+  .slice(0, 75);
+
+const shareTitle = shortTitle;
 
   return {
     title: shareTitle,
