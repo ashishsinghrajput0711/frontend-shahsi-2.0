@@ -70,8 +70,15 @@ function absoluteUrl(url?: string | null) {
 }
 
 function isImageLike(item: any) {
+  if (typeof item === "string") return true;
+
   const type = String(
-    item?.type || item?.mediaType || item?.resourceType || item?.mimeType || "",
+    item?.type ||
+      item?.mediaType ||
+      item?.resourceType ||
+      item?.viewType ||
+      item?.mimeType ||
+      "",
   ).toLowerCase();
 
   if (!type) return true;
@@ -79,13 +86,17 @@ function isImageLike(item: any) {
   return type.includes("image") && !type.includes("video");
 }
 
-function getImageFromArray(items: any[]) {
+function getImageFromArray(items?: any[]) {
+  if (!Array.isArray(items) || items.length === 0) return "";
+
   const imageItems = items.filter((item) => {
     if (typeof item === "string") return true;
     return isImageLike(item);
   });
 
   const sortedItems = [...imageItems].sort((a, b) => {
+    if (typeof a === "string" || typeof b === "string") return 0;
+
     const aPrimary = Boolean(a?.isPrimary || a?.primary);
     const bPrimary = Boolean(b?.isPrimary || b?.primary);
 
@@ -98,7 +109,11 @@ function getImageFromArray(items: any[]) {
     return aPosition - bPosition;
   });
 
-  const primary = sortedItems[0];
+  const primary =
+    sortedItems.find((item) => {
+      if (typeof item === "string") return false;
+      return item?.isPrimary || item?.primary;
+    }) || sortedItems[0];
 
   if (!primary) return "";
 
@@ -111,6 +126,7 @@ function getImageFromArray(items: any[]) {
     primary?.src ||
     primary?.imageUrl ||
     primary?.thumbnailUrl ||
+    primary?.thumbnail ||
     primary?.path ||
     ""
   );
@@ -123,15 +139,17 @@ function getProductImage(product: any) {
   return absoluteUrl(
     product?.socialPreviewImage ||
       product?.socialImage ||
-      getImageFromArray(images) ||
-      getImageFromArray(media) ||
+      product?.ogImage ||
+      product?.openGraph?.image ||
+      product?.pinterestImage ||
+      product?.pinterestSeo?.image ||
       product?.primaryImage ||
       product?.imageUrl ||
       product?.image ||
       product?.thumbnail ||
       product?.thumbnailUrl ||
-      product?.ogImage ||
-      product?.pinterestImage ||
+      getImageFromArray(images) ||
+      getImageFromArray(media) ||
       "",
   );
 }
@@ -159,30 +177,87 @@ function buildSocialPreviewImage(url?: string | null) {
   );
 }
 
-function getProductPrice(product: any) {
+function getRawProductPrice(product: any) {
   return (
-    product?.price ||
-    product?.basePrice ||
-    product?.listingPrice ||
-    product?.salePrice ||
-    product?.rentalPrice ||
-    product?.rentPrice ||
-    product?.resalePrice ||
-    product?.originalPrice ||
-    product?.pricing?.amount ||
+    product?.pricing?.amount ??
+    product?.price ??
+    product?.basePrice ??
+    product?.listingPrice ??
+    product?.salePrice ??
+    product?.rentalPrice ??
+    product?.rentPrice ??
+    product?.resalePrice ??
+    product?.originalPrice ??
     ""
   );
+}
+
+function getNumericPrice(value: unknown) {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+
+  const numeric = Number(String(value).replace(/[^0-9.]/g, ""));
+
+  return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : "";
+}
+
+function getFormattedPrice(product: any, currency: string) {
+  if (product?.pricing?.displayPrice) {
+    return String(product.pricing.displayPrice);
+  }
+
+  const rawPrice = getRawProductPrice(product);
+  const numericPrice = Number(getNumericPrice(rawPrice));
+
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+    return "";
+  }
+
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(numericPrice);
+  } catch {
+    return `${currency} ${numericPrice}`;
+  }
 }
 
 function getProductDescription(product: any) {
   return (
     product?.metaDescription ||
     product?.seoDescription ||
+    product?.ogDescription ||
+    product?.openGraph?.description ||
+    product?.pinterestDescription ||
+    product?.pinterestSeo?.description ||
     product?.shortDescription ||
     product?.excerpt ||
     product?.description ||
     "Explore this Shahsi product."
   );
+}
+
+function getMetaDescriptionWithPrice({
+  product,
+  currency,
+}: {
+  product: any;
+  currency: string;
+}) {
+  const baseDescription = stripHtml(getProductDescription(product));
+  const priceText = getFormattedPrice(product, currency);
+
+  const parts = [
+    baseDescription,
+    priceText ? `Price: ${priceText}.` : "",
+  ].filter(Boolean);
+
+  return parts.join(" ").slice(0, 260);
 }
 
 export async function generateMetadata({
@@ -194,12 +269,23 @@ export async function generateMetadata({
   const title = String(
     product?.seoTitle ||
       product?.metaTitle ||
+      product?.ogTitle ||
+      product?.openGraph?.title ||
+      product?.pinterestTitle ||
+      product?.pinterestSeo?.title ||
       product?.title ||
       product?.name ||
       "Shahsi Product",
   ).trim();
 
-  const description = stripHtml(getProductDescription(product)).slice(0, 220);
+  const currency = String(
+    product?.currency || product?.pricing?.currency || "USD",
+  ).toUpperCase();
+
+  const description = getMetaDescriptionWithPrice({
+    product,
+    currency,
+  });
 
   const productImage = getProductImage(product);
   const socialImage = buildSocialPreviewImage(productImage);
@@ -207,42 +293,42 @@ export async function generateMetadata({
   const productSlug = String(product?.slug || slug).trim();
   const url = `${SITE_URL}/products/${encodeURIComponent(productSlug)}`;
 
-  const price = getProductPrice(product);
-  const currency = String(
-    product?.currency || product?.pricing?.currency || "USD",
-  ).toUpperCase();
+  const rawPrice = getRawProductPrice(product);
+  const priceAmount = getNumericPrice(rawPrice);
+  const priceText = getFormattedPrice(product, currency);
+  const shareTitle = priceText ? `${title} · ${priceText}` : title;
 
   return {
-    title,
+    title: shareTitle,
     description,
     alternates: {
       canonical: url,
     },
     openGraph: {
-  title,
-  description,
-  url,
-  siteName: "Shahsi",
-  type: "website",
-  images: socialImage
-    ? [
-        {
-          url: socialImage,
-          width: 1200,
-          height: 630,
-          alt: title,
-        },
-      ]
-    : [],
-},
+      title: shareTitle,
+      description,
+      url,
+      siteName: "Shahsi",
+      type: "website",
+      images: socialImage
+        ? [
+            {
+              url: socialImage,
+              width: 1200,
+              height: 630,
+              alt: shareTitle,
+            },
+          ]
+        : [],
+    },
     twitter: {
       card: "summary_large_image",
-      title,
+      title: shareTitle,
       description,
       images: socialImage ? [socialImage] : [],
     },
     other: {
-      "product:price:amount": price ? String(price) : "",
+      "product:price:amount": priceAmount,
       "product:price:currency": currency,
       "pinterest-rich-pin": "true",
     },
