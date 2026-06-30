@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import ProductDetailClient from "./ProductDetailClient";
 
 const RAW_API_BASE_URL =
@@ -22,6 +23,15 @@ type PageProps = {
   }>;
 };
 
+type SeoRedirectRecord = {
+  sourceUrl?: string | null;
+  sourcePath?: string | null;
+  destinationUrl?: string | null;
+  destinationPath?: string | null;
+  status?: string | null;
+  redirectType?: string | null;
+};
+
 async function getProduct(slug: string) {
   try {
     const response = await fetch(
@@ -42,6 +52,64 @@ async function getProduct(slug: string) {
     return json?.data || json?.product || json;
   } catch (error) {
     console.error("Product metadata fetch failed:", error);
+    return null;
+  }
+}
+
+
+function normalizePath(value?: string | null) {
+  const cleanValue = String(value || "").trim();
+
+  if (!cleanValue) return "";
+
+  try {
+    const url = new URL(cleanValue);
+    return url.pathname;
+  } catch {
+    return cleanValue.startsWith("/") ? cleanValue : `/${cleanValue}`;
+  }
+}
+
+function getRedirectItems(json: any): SeoRedirectRecord[] {
+  if (Array.isArray(json)) return json;
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.redirects)) return json.redirects;
+  if (Array.isArray(json?.data?.redirects)) return json.data.redirects;
+  if (Array.isArray(json?.data?.items)) return json.data.items;
+  if (Array.isArray(json?.items)) return json.items;
+
+  return [];
+}
+
+async function getRedirectForPath(path: string) {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/seo/redirects/resolve?path=${encodeURIComponent(path)}`,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+        },
+        cache: "no-store",
+      },
+    );
+
+    if (!response.ok) {
+      console.error("SEO redirect resolve failed:", response.status);
+      return null;
+    }
+
+    const json = await response.json();
+
+    return (
+      json?.data ||
+      json?.redirect ||
+      json?.result ||
+      json ||
+      null
+    );
+  } catch (error) {
+    console.error("SEO redirect lookup failed:", error);
     return null;
   }
 }
@@ -355,5 +423,31 @@ const facebookTitle = String(
 export default async function ProductPage({ params }: PageProps) {
   const { slug } = await params;
 
-  return <ProductDetailClient slug={slug} />;
+  const product = await getProduct(slug);
+
+  if (!product) {
+    const currentPath = `/products/${slug}`;
+    const redirectRecord = await getRedirectForPath(currentPath);
+
+    const destination =
+      redirectRecord?.destinationPath || redirectRecord?.destinationUrl;
+
+    if (destination) {
+      const redirectType = String(
+        redirectRecord?.redirectType || "",
+      ).toUpperCase();
+
+      if (redirectType.includes("PERMANENT")) {
+        permanentRedirect(destination);
+      }
+
+      redirect(destination);
+    }
+
+    notFound();
+  }
+
+  const resolvedSlug = String(product?.slug || slug).trim();
+
+  return <ProductDetailClient slug={resolvedSlug} />;
 }

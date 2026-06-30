@@ -514,6 +514,127 @@ async function fetchCatalogProductBySlugOrId(productSlugOrId: string) {
   });
 }
 
+
+type SeoRedirectRecord = {
+  sourceUrl?: string | null;
+  sourcePath?: string | null;
+  destinationUrl?: string | null;
+  destinationPath?: string | null;
+  status?: string | null;
+  redirectType?: string | null;
+};
+
+function normalizeRedirectPath(value?: string | null) {
+  const cleanValue = String(value || "").trim();
+
+  if (!cleanValue) return "";
+
+  try {
+    const url = new URL(cleanValue);
+    return url.pathname;
+  } catch {
+    return cleanValue.startsWith("/") ? cleanValue : `/${cleanValue}`;
+  }
+}
+
+function getRedirectItems(json: any): SeoRedirectRecord[] {
+  if (Array.isArray(json)) return json;
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.redirects)) return json.redirects;
+  if (Array.isArray(json?.data?.redirects)) return json.data.redirects;
+  if (Array.isArray(json?.data?.items)) return json.data.items;
+  if (Array.isArray(json?.items)) return json.items;
+
+  return [];
+}
+
+async function getSeoRedirectForCurrentPath() {
+  if (typeof window === "undefined") return null;
+
+  const currentPath = normalizeRedirectPath(window.location.pathname);
+
+  try {
+    const response = await apiRequest<any>(
+      `/seo/redirects/resolve?path=${encodeURIComponent(currentPath)}`,
+      {
+        method: "GET",
+      },
+    );
+
+    return (
+      response?.data ||
+      response?.redirect ||
+      response?.result ||
+      response ||
+      null
+    );
+  } catch (error) {
+    console.error("SEO redirect lookup failed:", error);
+    return null;
+  }
+}
+
+function getRedirectDestination(record?: SeoRedirectRecord | string | null) {
+  if (typeof record === "string") {
+    const cleanRecord = record.trim();
+
+    if (!cleanRecord) return "";
+
+    try {
+      const url = new URL(cleanRecord);
+      return url.pathname + url.search + url.hash;
+    } catch {
+      return cleanRecord.startsWith("/") ? cleanRecord : `/${cleanRecord}`;
+    }
+  }
+
+  const destination = String(
+    record?.destinationPath || record?.destinationUrl || "",
+  ).trim();
+
+  if (!destination) return "";
+
+  try {
+    const url = new URL(destination);
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return destination.startsWith("/") ? destination : `/${destination}`;
+  }
+}
+
+function getRedirectDestinationFromError(error: any) {
+  const message = String(error?.message || error || "").trim();
+
+  const match = message.match(/Cannot GET\s+(\/[^\s]+)/i);
+  const destination = match?.[1] || "";
+
+  if (!destination) return "";
+
+  try {
+    const url = new URL(destination);
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return destination.startsWith("/") ? destination : `/${destination}`;
+  }
+}
+
+function normalizeDestinationForCurrentCategory(
+  destination: string,
+  cleanCategoryPath: string,
+) {
+  if (!destination) return "";
+
+  if (destination.startsWith("/products/") && cleanCategoryPath) {
+    const nextSlug = destination.split("/").filter(Boolean).pop();
+
+    if (nextSlug) {
+      return `/${cleanCategoryPath}/${encodeURIComponent(nextSlug)}`;
+    }
+  }
+
+  return destination;
+}
+
 function getVariantId(variant?: any | null) {
   return readFirst(
     variant?.id,
@@ -2014,15 +2135,34 @@ if (hydratedSimilarColorProducts.length) {
     setSimilarColorProducts([]);
   }
 }
-      } catch (err: any) {
-        console.error("Product detail load failed:", err);
+} catch (err: any) {
+  console.error("Product detail load failed:", err);
 
-        if (!mounted) return;
+  let destination = normalizeDestinationForCurrentCategory(
+    getRedirectDestinationFromError(err),
+    cleanCategoryPath,
+  );
 
-        setProduct(null);
-        setError(err?.message || "Product detail load failed.");
-        setSimilarColorProducts([]);
-      } finally {
+  if (!destination) {
+    const redirectRecord = await getSeoRedirectForCurrentPath();
+
+    destination = normalizeDestinationForCurrentCategory(
+      getRedirectDestination(redirectRecord),
+      cleanCategoryPath,
+    );
+  }
+
+  if (destination) {
+    window.location.replace(destination);
+    return;
+  }
+
+  if (!mounted) return;
+
+  setProduct(null);
+  setError(err?.message || "Product detail load failed.");
+  setSimilarColorProducts([]);
+} finally {
         if (mounted) setLoading(false);
       }
     }
