@@ -50,7 +50,7 @@ import {
 } from "@/lib/category-tree.utils";
 
 import { apiRequest } from "@/lib/api/client";
-import { isPublicVisibleProduct } from "@/lib/product-visibility";
+
 
 type BreadcrumbItem = {
   label: string;
@@ -440,6 +440,9 @@ function formatMoney(value?: number | string, currency = "USD") {
   return `$${numeric.toLocaleString("en-US")}`;
 }
 
+
+
+
 function stripHtml(value?: string) {
   return String(value || "")
     .replace(/<!--[\s\S]*?-->/g, "")
@@ -479,6 +482,64 @@ function getRawProduct(response: any) {
     response?.item ||
     response
   );
+}
+
+function getPublicProductStatus(product: any) {
+  return String(
+    product?.status ||
+      product?.adminStatus ||
+      product?.productStatus ||
+      product?.publishStatus ||
+      product?.statusLabel ||
+      product?.data?.status ||
+      product?.data?.adminStatus ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+}
+
+function isActiveStorefrontProduct(product: any) {
+  const status = String(
+    product?.status ||
+      product?.adminStatus ||
+      product?.productStatus ||
+      product?.statusLabel ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const publishStatus = String(product?.publishStatus || "")
+    .trim()
+    .toUpperCase();
+
+  const published =
+    product?.published === true ||
+    product?.isPublished === true ||
+    publishStatus === "PUBLISHED";
+
+  console.log("STOREFRONT_PRODUCT_STATUS:", {
+    status,
+    publishStatus,
+    published,
+    rawStatus: product?.status,
+    isActive: product?.isActive,
+    productPublished: product?.published,
+    adminStatus: product?.adminStatus,
+    productStatus: product?.productStatus,
+    statusLabel: product?.statusLabel,
+  });
+
+  if (publishStatus || product?.published !== undefined || product?.isPublished !== undefined) {
+    return (
+      (status === "ACTIVE" || status === "PUBLISHED") &&
+      published &&
+      publishStatus !== "UNPUBLISHED"
+    );
+  }
+
+  return status === "ACTIVE" || status === "PUBLISHED";
 }
 
 function getProductId(product: any) {
@@ -2055,13 +2116,23 @@ if (!cleanCategoryPath) {
 const response = await fetchCatalogProductBySlugOrId(cleanProductId);
 const rawProduct = getRawProduct(response);
 
-        if (!isPublicVisibleProduct(rawProduct)) {
-          if (!mounted) return;
+if (!isActiveStorefrontProduct(rawProduct)) {
+  if (!mounted) return;
 
-          setProduct(null);
-          setError("Product active/published nahi hai.");
-          return;
-        }
+  setProduct(null);
+  setError("Product available nahi hai.");
+  setSimilarColorProducts([]);
+  return;
+}
+
+     if (!isActiveStorefrontProduct(rawProduct)) {
+  if (!mounted) return;
+
+  setProduct(null);
+  setError("Product available nahi hai.");
+  setSimilarColorProducts([]);
+  return;
+}
 
         const mappedProduct = mapBackendProduct(rawProduct);
 

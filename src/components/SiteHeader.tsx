@@ -95,6 +95,42 @@ function getPublicProductCount(node?: CatalogCategoryTreeNode | null) {
 }
 
 
+function isVisibleSearchProduct(product: any) {
+  const status = String(
+    product?.status ||
+      product?.adminStatus ||
+      product?.productStatus ||
+      product?.statusLabel ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const publishStatus = String(product?.publishStatus || "")
+    .trim()
+    .toUpperCase();
+
+  const published =
+    product?.published === true ||
+    product?.isPublished === true ||
+    publishStatus === "PUBLISHED";
+
+  if (
+    publishStatus ||
+    product?.published !== undefined ||
+    product?.isPublished !== undefined
+  ) {
+    return (
+      (status === "ACTIVE" || status === "PUBLISHED") &&
+      published &&
+      publishStatus !== "UNPUBLISHED"
+    );
+  }
+
+  return status === "ACTIVE" || status === "PUBLISHED";
+}
+
+
 type SearchCategorySuggestion = {
   id: string;
   name: string;
@@ -579,10 +615,11 @@ useEffect(() => {
         setSearchError("");
         setSearchOpen(true);
 
-        const response = await searchProducts(query);
-      const results = unwrapSearchResults(response).filter((product) =>
-  productMatchesSearchQuery(product, searchQuery)
-);
+       const response = await searchProducts(query);
+
+const results = unwrapSearchResults(response)
+  .filter(isVisibleSearchProduct)
+  .filter((product) => productMatchesSearchQuery(product, searchQuery));
 
 setSearchResults(results);
       } catch (error: any) {
@@ -930,14 +967,24 @@ const hasPartnerBrand = Boolean(
         const breadcrumbText = category.breadcrumb.join(" / ");
 
         return (
-          <a
-            key={`search-category-${category.id}`}
-            href={category.href}
-            onClick={() => {
-  setRecentSearches(saveRecentSearch(searchQuery));
-}}
-            className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-4 border-t border-[#f5efe7] px-5 py-3 transition hover:bg-[#fbf8f1]"
-          >
+        <a
+  key={`search-category-${category.id}`}
+  href={category.href}
+  onMouseDown={(event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setRecentSearches(saveRecentSearch(searchQuery));
+    setSearchOpen(false);
+
+    window.location.href = category.href;
+  }}
+  onClick={(event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }}
+  className="grid cursor-pointer grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-4 border-t border-[#f5efe7] px-5 py-3 transition hover:bg-[#fbf8f1]"
+>
           <div className="h-[52px] w-[52px] overflow-hidden rounded-full bg-[#efe8de]">
               {category.imageUrl ? (
                 <img
@@ -989,14 +1036,24 @@ const hasPartnerBrand = Boolean(
                       const href = getSearchProductHref(product);
 
                       return (
-                        <a
-                          key={product.id || product.productId || title}
-                          href={href}
-                           onClick={() => {
+                       <a
+  key={product.id || product.productId || title}
+  href={href}
+  onMouseDown={(event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
     setRecentSearches(saveRecentSearch(searchQuery));
+    setSearchOpen(false);
+
+    window.location.href = href;
   }}
-                         className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-4 border-b border-[#f0ebe4] px-5 py-4 transition hover:bg-[#fbf8f1]"
-                        >
+  onClick={(event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }}
+  className="grid cursor-pointer grid-cols-[64px_minmax(0,1fr)] items-center gap-4 border-b border-[#f0ebe4] px-5 py-4 transition hover:bg-[#fbf8f1]"
+>
                           <div className="h-16 w-16 overflow-hidden bg-[#eee8df]">
                             {image ? (
                               <img

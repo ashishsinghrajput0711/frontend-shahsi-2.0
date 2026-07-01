@@ -57,6 +57,22 @@ async function getProduct(slug: string) {
 }
 
 
+function isActiveStorefrontProduct(product: any) {
+  const status = String(
+    product?.status ||
+      product?.adminStatus ||
+      product?.productStatus ||
+      product?.publishStatus ||
+      product?.statusLabel ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+  return status === "ACTIVE" || status === "PUBLISHED";
+}
+
+
 function normalizePath(value?: string | null) {
   const cleanValue = String(value || "").trim();
 
@@ -81,10 +97,60 @@ function getRedirectItems(json: any): SeoRedirectRecord[] {
   return [];
 }
 
-async function getRedirectForPath(path: string) {
+function normalizeDestinationUrl(value?: string | null) {
+  const cleanValue = String(value || "").trim();
+
+  if (!cleanValue) return "";
+
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/seo/redirects/resolve?path=${encodeURIComponent(path)}`,
+    const url = new URL(cleanValue);
+
+    if (url.origin === SITE_URL) {
+      return `${url.pathname}${url.search}${url.hash}`;
+    }
+
+    return cleanValue;
+  } catch {
+    return cleanValue.startsWith("/") ? cleanValue : `/${cleanValue}`;
+  }
+}
+
+function isActiveRedirect(record?: SeoRedirectRecord | null) {
+  const status = String(record?.status || "").toUpperCase();
+  return !status || status === "ACTIVE" || status === "PUBLISHED";
+}
+
+function getRedirectDestination(record?: SeoRedirectRecord | null) {
+  return normalizeDestinationUrl(record?.destinationPath || record?.destinationUrl);
+}
+
+function findMatchingRedirect(
+  records: SeoRedirectRecord[],
+  path: string,
+): SeoRedirectRecord | null {
+  const currentPath = normalizePath(path);
+
+  return (
+    records.find((record) => {
+      if (!isActiveRedirect(record)) return false;
+
+      const sourcePath = normalizePath(record.sourcePath || record.sourceUrl);
+      const destination = getRedirectDestination(record);
+
+      if (!sourcePath || !destination) return false;
+      if (sourcePath === normalizePath(destination)) return false;
+
+      return sourcePath === currentPath;
+    }) || null
+  );
+}
+
+async function getRedirectForPath(path: string) {
+  const currentPath = normalizePath(path);
+
+  try {
+    const resolveResponse = await fetch(
+      `${API_BASE_URL}/seo/redirects/resolve?path=${encodeURIComponent(currentPath)}`,
       {
         method: "GET",
         headers: {
@@ -94,20 +160,50 @@ async function getRedirectForPath(path: string) {
       },
     );
 
+    if (resolveResponse.ok) {
+      const json = await resolveResponse.json();
+      const record = json?.data || json?.redirect || json?.result || json || null;
+      const destination = getRedirectDestination(record);
+
+      if (record && isActiveRedirect(record) && destination) {
+        return record as SeoRedirectRecord;
+      }
+    }
+  } catch (error) {
+    console.error("SEO redirect resolve endpoint lookup failed:", error);
+  }
+
+  try {
+    const adminToken =
+      process.env.SEO_REDIRECT_LOOKUP_TOKEN ||
+      process.env.ADMIN_API_TOKEN ||
+      process.env.NEXT_PUBLIC_ADMIN_API_TOKEN ||
+      "";
+
+    const headers: HeadersInit = {
+      accept: "application/json",
+    };
+
+    if (adminToken) {
+      headers.Authorization = `Bearer ${adminToken}`;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/admin/seo/redirects?status=ALL`,
+      {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      },
+    );
+
     if (!response.ok) {
-      console.error("SEO redirect resolve failed:", response.status);
+      console.error("SEO redirect list lookup failed:", response.status);
       return null;
     }
 
     const json = await response.json();
-
-    return (
-      json?.data ||
-      json?.redirect ||
-      json?.result ||
-      json ||
-      null
-    );
+    return findMatchingRedirect(getRedirectItems(json), currentPath);
   } catch (error) {
     console.error("SEO redirect lookup failed:", error);
     return null;
@@ -339,6 +435,12 @@ export async function generateMetadata({
   const { slug } = await params;
   const product = await getProduct(slug);
 
+  if (!product || !isActiveStorefrontProduct(product)) {
+  return {
+    title: "Product not found | Shahsi",
+  };
+}
+
  const seoTitle = String(
   product?.seoTitle ||
     product?.metaTitle ||
@@ -429,10 +531,9 @@ export default async function ProductPage({ params }: PageProps) {
     const currentPath = `/products/${slug}`;
     const redirectRecord = await getRedirectForPath(currentPath);
 
-    const destination =
-      redirectRecord?.destinationPath || redirectRecord?.destinationUrl;
+    const destination = getRedirectDestination(redirectRecord);
 
-    if (destination) {
+    if (destination && normalizePath(destination) !== currentPath) {
       const redirectType = String(
         redirectRecord?.redirectType || "",
       ).toUpperCase();
@@ -444,6 +545,10 @@ export default async function ProductPage({ params }: PageProps) {
       redirect(destination);
     }
 
+    notFound();
+  }
+
+  if (!isActiveStorefrontProduct(product)) {
     notFound();
   }
 
